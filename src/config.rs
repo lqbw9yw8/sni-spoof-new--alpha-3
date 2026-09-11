@@ -72,7 +72,8 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub enable_combined_fragmentation: bool,
     // --- ALL PORTS upgrade ---
-    /// List of TCP/UDP ports to intercept. Empty = default [443]. Use [443, 8443, 2053, 2083, 2087, 2096, 8080, 80] for all HTTPS-like
+    /// List of TCP/UDP ports to intercept. Empty = default [443].
+    /// Example: [443, 8443, 2053, 2083, 2087, 2096, 8080, 80]
     #[serde(default)]
     pub intercept_ports: Vec<u16>,
     /// If true, intercept ALL TCP ports except NEVER_INTERCEPT. Default true
@@ -162,7 +163,8 @@ pub struct Settings {
     /// Learn decoy TTL from the inbound hop count to this host.
     #[serde(default)]
     pub enable_autottl: bool,
-    /// Signed delta added to the learned TTL (positive = reach one hop further).
+    /// Delta added to the learned TTL (-32..=32).
+    /// Positive = reach one hop further, negative = die earlier.
     #[serde(default)]
     pub autottl_delta: i8,
     /// Apply the HTTP `Host:`-line split trick to plaintext HTTP flows.
@@ -841,9 +843,9 @@ impl Settings {
                 "tls_record_chunk_size must be <= 16384".into(),
             ));
         }
-        if !(0..=32).contains(&self.autottl_delta) {
+        if !(-32..=32).contains(&self.autottl_delta) {
             return Err(DpiGuardError::Config(
-                "autottl_delta must be between 0 and 32".into(),
+                "autottl_delta must be between -32 and 32".into(),
             ));
         }
         if self.intercept_all_tcp && self.intercept_all_udp {

@@ -1,5 +1,5 @@
 {
-  "commit": "8087f4e+audit-2026-09-09",
+  "commit": "ff3fd44",
   "modules": {
     "anti_fingerprint": {
       "lines": 192,
@@ -23,7 +23,7 @@
       "unsafe": false
     },
     "config": {
-      "lines": 1529,
+      "lines": 1531,
       "tests": 30,
       "tag": "DONE",
       "win": 0,
@@ -191,8 +191,8 @@
       "unsafe": false
     },
     "pipeline": {
-      "lines": 3176,
-      "tests": 46,
+      "lines": 3315,
+      "tests": 50,
       "tag": "DONE",
       "win": 0,
       "unsafe": false

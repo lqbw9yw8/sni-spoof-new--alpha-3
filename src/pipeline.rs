@@ -3172,4 +3172,143 @@ mod tests {
         }
         assert!(p.last_activity_count() <= MAX_LAST_ACTIVITY);
     }
+
+    // ---- ECH interference matrix — 4 critical pairs ----
+
+    fn ech_test_config_hex() -> (String, String) {
+        let public_name = "public.example";
+        let config_id = 7u8;
+        let mut contents = Vec::new();
+        contents.push(config_id);
+        contents.extend_from_slice(&0x0020u16.to_be_bytes());
+        contents.extend_from_slice(&32u16.to_be_bytes());
+        contents.extend_from_slice(&[0x11u8; 32]);
+        contents.extend_from_slice(&4u16.to_be_bytes());
+        contents.extend_from_slice(&0x0001u16.to_be_bytes());
+        contents.extend_from_slice(&0x0003u16.to_be_bytes());
+        contents.push(128u8);
+        contents.push(public_name.len() as u8);
+        contents.extend_from_slice(public_name.as_bytes());
+        contents.extend_from_slice(&0u16.to_be_bytes());
+
+        let mut entry = Vec::new();
+        entry.extend_from_slice(&0xFE0Du16.to_be_bytes());
+        entry.extend_from_slice(&(contents.len() as u16).to_be_bytes());
+        entry.extend_from_slice(&contents);
+
+        let hex: String = entry.iter().map(|b| format!("{:02x}", b)).collect();
+        (hex, public_name.to_string())
+    }
+
+    fn pipeline_with_ech_and_flags(
+        extra: impl FnOnce(&mut super::super::config::Settings),
+    ) -> (Pipeline, String) {
+        let (hex, public_name) = ech_test_config_hex();
+        let mut s = super::super::config::Settings {
+            enable_real_ech: true,
+            real_ech_config_hex: hex,
+            enable_decoys: false,
+            enable_sni_fragmentation: false,
+            enable_combined_fragmentation: false,
+            enable_geedge_evasion: false,
+            ..super::super::config::Settings::default()
+        };
+        extra(&mut s);
+        let p = Pipeline::new(s);
+        (p, public_name)
+    }
+
+    #[test]
+    fn ech_real_x_utls_seal_is_last_mutation() {
+        let (mut p, public_name) = pipeline_with_ech_and_flags(|s| {
+            s.enable_utls_fingerprint = true;
+            s.utls_browser = "firefox".into();
+        });
+        let pkt = ch_pkt("secret.example.com");
+        let WireAction::Send(pkts) = p.handle(&pkt).unwrap() else {
+            panic!("held");
+        };
+        assert_eq!(pkts.len(), 1);
+        let parsed = packet::parse_l3l4(&pkts[0]).unwrap();
+        let outer = parsed.payload(&pkts[0]);
+        let (s, e) = fragmentation::calculate_smart_split_points(outer).unwrap();
+        assert_eq!(&outer[s..e], public_name.as_bytes());
+        assert!(!outer.windows(18).any(|w| w == b"secret.example.com"));
+        let exts = fragmentation::list_extensions(outer).unwrap();
+        assert!(exts.iter().any(|e| e.ext_type == 0xFE0D));
+        assert!(!exts.iter().any(|e| e.ext_type == 0xFF01));
+        assert!(fragmentation::sni_bytes(outer).is_some());
+    }
+
+    #[test]
+    fn ech_real_x_geedge_no_injection_after_seal() {
+        let (mut p, public_name) = pipeline_with_ech_and_flags(|s| {
+            s.enable_geedge_evasion = true;
+            s.mutation_profile = "ChinaRegional".into();
+        });
+        let pkt = ch_pkt("secret.example.com");
+        let WireAction::Send(pkts) = p.handle(&pkt).unwrap() else {
+            panic!("held");
+        };
+        assert_eq!(pkts.len(), 1);
+        let parsed = packet::parse_l3l4(&pkts[0]).unwrap();
+        let outer = parsed.payload(&pkts[0]);
+        assert_eq!(outer[0], 0x16, "Geedge fake record must not prepend after ECH seal");
+        let (s, e) = fragmentation::calculate_smart_split_points(outer).unwrap();
+        assert_eq!(&outer[s..e], public_name.as_bytes());
+        assert!(!outer.windows(18).any(|w| w == b"secret.example.com"));
+        let exts = fragmentation::list_extensions(outer).unwrap();
+        assert!(exts.iter().any(|e| e.ext_type == 0xFE0D));
+    }
+
+    #[test]
+    fn ech_real_x_padding_before_seal() {
+        let (mut p, public_name) = pipeline_with_ech_and_flags(|s| {
+            s.enable_padding_inflation = true;
+        });
+        let pkt = ch_pkt("secret.example.com");
+        let WireAction::Send(pkts) = p.handle(&pkt).unwrap() else {
+            panic!("held");
+        };
+        assert_eq!(pkts.len(), 1);
+        let parsed = packet::parse_l3l4(&pkts[0]).unwrap();
+        let outer = parsed.payload(&pkts[0]);
+        let (s, e) = fragmentation::calculate_smart_split_points(outer).unwrap();
+        assert_eq!(&outer[s..e], public_name.as_bytes());
+        assert!(!outer.windows(18).any(|w| w == b"secret.example.com"));
+        assert!(fragmentation::sni_bytes(outer).is_some());
+        let exts = fragmentation::list_extensions(outer).unwrap();
+        assert!(exts.iter().any(|e| e.ext_type == 0xFE0D));
+    }
+
+    #[test]
+    fn ech_real_x_nested_cloak_no_ff01_leak() {
+        let (mut p, public_name) = pipeline_with_ech_and_flags(|s| {
+            s.mutation_profile = "NestedCloak".into();
+            s.fronting_benign_sni = "www.microsoft.com".into();
+            s.enable_sni_fragmentation = true;
+            s.enable_combined_fragmentation = true;
+        });
+        let pkt = ch_pkt("secret.example.com");
+        let WireAction::Send(pkts) = p.handle(&pkt).unwrap() else {
+            panic!("held");
+        };
+        assert_eq!(
+            pkts.len(),
+            1,
+            "NestedCloak must be disabled when real ECH is armed"
+        );
+        let parsed = packet::parse_l3l4(&pkts[0]).unwrap();
+        let outer = parsed.payload(&pkts[0]);
+        let (s, e) = fragmentation::calculate_smart_split_points(outer).unwrap();
+        assert_eq!(&outer[s..e], public_name.as_bytes());
+        assert!(!outer.windows(18).any(|w| w == b"secret.example.com"));
+        assert!(!outer.windows(19).any(|w| w == b"www.microsoft.com"));
+        let exts = fragmentation::list_extensions(outer).unwrap();
+        assert!(
+            !exts.iter().any(|e| e.ext_type == 0xFF01),
+            "0xFF01 must not leak when ECH is armed"
+        );
+        assert!(exts.iter().any(|e| e.ext_type == 0xFE0D));
+    }
 }
