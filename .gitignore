@@ -1,0 +1,23 @@
+# Binaries - WinDivert driver must be fetched via scripts/fetch-windivert.sh
+*.dll
+*.lib
+*.sys
+*.exe
+*.pdb
+target/
+# Config
+dpi_guard.toml
+dpi_guard.dns_cache
+*.lock
+# IDE
+.vscode/
+.idea/
+# OS
+.DS_Store
+Thumbs.db
+# Node
+uitest/node_modules/
+# Rust
+Cargo.lock
+# Logs
+*.log
