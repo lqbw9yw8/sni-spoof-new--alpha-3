@@ -3,6 +3,10 @@
 > تاریخ: 2026-09-09 (UTC) · شاخه: `arena/01a085e7-sni-spoof-new-alpha-3` · مبنا: `ff3fd44`
 > استاندارد نگارش: ASD-STE100 (Simplified Technical English) برای بخش فنی + فارسی برای خلاصه مدیریتی
 > ابزارها: `python3 tools/gen_status.py`, `npm test`, `grep`, manual line-by-line review of 41 modules (22493 lines)
+>
+> **Historical snapshot:** this report predates the 2026-09-12 WFP and DoH
+> hardening patch. Its references to a WFP "stub" describe the code at the
+> audit date; consult `STATUS.md` and `CHANGELOG.md` for the current state.
 
 ---
 

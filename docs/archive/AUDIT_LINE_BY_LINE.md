@@ -1,3 +1,15 @@
+> **⚠️ ARCHIVED — DO NOT TRUST / بایگانی‌شده — اعتماد نکنید**
+>
+> این سند **تاریخی** است و وضعیت فعلی کد را توصیف نمی‌کند. هر عدد، برچسب
+> `DONE` یا نتیجهٔ تستی که در آن می‌بینید ممکن است مدت‌ها پیش بی‌اعتبار شده
+> باشد. منابع معتبر: [`STATUS.md`](../../STATUS.md)،
+> [`TEST_MATRIX.md`](../../TEST_MATRIX.md)،
+> [`ARCHITECTURE.md`](../../ARCHITECTURE.md).
+>
+> Historical document kept for context only. Do not treat any claim, status
+> tag or test result in it as current. Canonical sources: `STATUS.md`,
+> `TEST_MATRIX.md`, `ARCHITECTURE.md`.
+
 # بازبینی خط‌به‌خط پروژه dpi_guard — ۲۰۲۶-۰۹-۰۳ (پس از اصلاحات)
 
 شاخه: `arena/01a0643a-sni-3` · کامیت پایه: `a83de97` («Add files via upload» — تک‌کامیت، هیچ تاریخچه‌ای نیست).

@@ -34,7 +34,7 @@ jobs:
           Copy-Item "target\x86_64-pc-windows-msvc\release\dpi_guard.exe" $out
           Copy-Item "dpi_guard.toml.example" "$out\dpi_guard.toml.example"
           Copy-Item "README.md" $out
-          Copy-Item "START_HERE.md" $out
+          Copy-Item "docs\archive\START_HERE.md" "$out\START_HERE.md"
           @"
           Put official WinDivert.dll + WinDivert64.sys next to dpi_guard.exe
           (https://reqrypt.org/windivert.html). Then copy dpi_guard.toml.example

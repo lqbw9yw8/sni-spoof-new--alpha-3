@@ -1,27 +1,17 @@
 # ci/
 
-The CI workflow lives here as a **plain file**, not under `.github/workflows/`.
+The canonical GitHub Actions workflows now live under `.github/workflows/` and
+are executed automatically:
 
-In this environment the GitHub token cannot push to `.github/workflows/` (that
-path requires a special permission), so the workflow is kept in `ci/` and the
-operator installs it with their own account:
+- `.github/workflows/ci.yml` — fmt, build, Rust tests, clippy, jsdom, docs lint
+- `.github/workflows/build-windows.yml` — Windows release build artifact + SHA-256
+- `.github/workflows/e2e.yml` — scheduled/manual WinDivert field smoke test
+- `.github/workflows/release.yml` — semver-tagged Windows release assets
 
-```bash
-mkdir -p .github/workflows
-cp ci/github-actions.yml .github/workflows/ci.yml
-git add .github/workflows/ci.yml
-git commit -m "ci: add workflow"
-git push
-```
+The YAML files in this directory are retained as templates for environments
+that import workflow definitions from `ci/`. They are **not** the files GitHub
+runs in this checkout, so do not cite them as evidence that CI executed.
 
-## What it does
-
-- matrix: `ubuntu-latest`, `macos-latest`, `windows-latest` on stable Rust
-- `cargo fmt --all -- --check`
-- `cargo build --all-targets`
-- `cargo test --all-targets` (pure-logic modules on every OS; `engine.rs` is
-  `cfg(windows)` and links on Windows)
-- `cargo clippy --all-targets -- -D warnings`
-- `RUSTFLAGS = -D warnings` so any rustc warning fails the build
-
-The workflow caches `~/.cargo` and `target/` keyed on `Cargo.lock`.
+The Windows artifact never bundles WinDivert.dll or WinDivert64.sys. Fetch the
+official pinned driver with `scripts/fetch-windivert.ps1` and verify the hashes
+before running the executable.

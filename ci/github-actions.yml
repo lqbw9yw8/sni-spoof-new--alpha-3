@@ -1,14 +1,11 @@
 # dpi_guard CI — test matrix
 #
-# This file is intentionally NOT placed under .github/workflows/. The repo
-# policy in this environment is that the GitHub token cannot push to
-# .github/workflows; an operator with their own account copies it there:
-#
-#     cp ci/github-actions.yml .github/workflows/ci.yml
+# Legacy template. The canonical always-on workflow is now
+# .github/workflows/ci.yml. This file remains for operators who import
+# workflows from ci/ in another checkout; it is not evidence that GitHub ran.
 #
 # Every pure-logic module builds and tests on Linux/macOS/Windows; the
-# Windows-only packet I/O (engine.rs) only links on `cfg(windows)` and uses
-# the published windivert 0.5 crate (no driver needed for `cargo test`).
+# Windows-only packet I/O (engine.rs) links on cfg(windows).
 
 name: ci
 
@@ -77,7 +74,7 @@ jobs:
 
       - name: Install harness dependencies
         working-directory: uitest
-        run: npm install
+        run: npm ci
 
       - name: Run dashboard + schema-coverage tests
         working-directory: uitest

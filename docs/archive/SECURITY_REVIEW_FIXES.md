@@ -1,3 +1,15 @@
+> **⚠️ ARCHIVED — DO NOT TRUST / بایگانی‌شده — اعتماد نکنید**
+>
+> این سند **تاریخی** است و وضعیت فعلی کد را توصیف نمی‌کند. هر عدد، برچسب
+> `DONE` یا نتیجهٔ تستی که در آن می‌بینید ممکن است مدت‌ها پیش بی‌اعتبار شده
+> باشد. منابع معتبر: [`STATUS.md`](../../STATUS.md)،
+> [`TEST_MATRIX.md`](../../TEST_MATRIX.md)،
+> [`ARCHITECTURE.md`](../../ARCHITECTURE.md).
+>
+> Historical document kept for context only. Do not treat any claim, status
+> tag or test result in it as current. Canonical sources: `STATUS.md`,
+> `TEST_MATRIX.md`, `ARCHITECTURE.md`.
+
 # بررسی امنیت شبکه + اصلاحات خط‌به‌خط
 
 مخزن: `sni-spoof-new-2` (crate: `dpi_guard`) — موتور دور زدن DPI با جهش/جعل SNI (ویندوز + WinDivert).

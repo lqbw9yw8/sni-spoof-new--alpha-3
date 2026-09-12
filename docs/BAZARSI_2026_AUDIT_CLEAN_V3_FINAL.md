@@ -1,5 +1,10 @@
 # گزارش نهایی پروژه تمیز — Master Prompt V3 Forensic Audit — بدون باگ
 
+> **HISTORICAL SNAPSHOT — DO NOT TRUST FOR CURRENT STATUS.** این گزارش در
+> ۲۰۲۶-۰۹-۰۹، قبل از hardening مربوط به WFP/DoH/driver و تغییرات فعلی تولید
+> شده است. اعداد و شاخهٔ زیر فقط سابقهٔ همان تحویل‌اند؛ برای وضعیت جاری فقط
+> `STATUS.md`، `TEST_MATRIX.md` و `SENTRY_REPORT.md` را بخوانید.
+>
 > تاریخ: 2026-09-09 — شاخه: `arena/01a085e7-sni-spoof-new-alpha-3` — کامیت: `92468d5`
 > آرشیو تمیز: `dpi_guard_clean_V3.tar.gz` (628 KiB, بدون باینری درایور)
 
