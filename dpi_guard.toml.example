@@ -35,8 +35,9 @@ kill_switch_adapter = ""
 # ALL PORTS default
 # ---------------------------------------------------------------------------
 # By default dpi_guard intercepts ALL TCP and UDP ports in both directions,
-# EXCEPT SSH (22), DNS (53), and RDP (3389) — those are never touched so the
-# operator's own remote access and plaintext DNS keep working. To narrow it,
+# EXCEPT SSH (22), DNS (53), and RDP (3389). WinDivert deliberately leaves
+# these ports alone: SSH/RDP stay available, while outbound plaintext DNS is
+# handled by the mandatory Windows WFP guard (blocked except loopback). To narrow it,
 # set intercept_all_* = false and list ports in intercept_ports.
 intercept_all_tcp = true
 intercept_all_udp = true
@@ -125,38 +126,30 @@ enable_geedge_evasion = true
 #             certutil -hashfile WinDivert64.sys SHA256
 #   Linux:    sha256sum WinDivert.dll WinDivert64.sys
 #
-# With pins set, engine::version_check refuses to start if either file next
-# to dpi_guard.exe does not match. With an empty list it only warns.
+# engine::version_check refuses to start unless both pins are present and
+# each file next to dpi_guard.exe matches its ordered digest. An empty list is
+# accepted only by the config parser for redacted/partial UI round-trips; the
+# Windows runtime refuses to load an unpinned driver.
 win_divert_sha256 = [
   "c1e060ee19444a259b2162f8af0f3fe8c4428a1c6f694dce20de194ac8d7d9a2", # WinDivert.dll   (2.2.2 x64)
   "8da085332782708d8767bcace5327a6ec7283c17cfb85e40b03cd2323a90ddc2", # WinDivert64.sys (2.2.2 x64)
 ]
 
 # ---------------------------------------------------------------------------
-# STUB-BACKED FIELDS — valid Settings, safe to leave at these defaults
+# PARTIAL-BACKED FIELDS — valid Settings, safe to leave at these defaults
 # ---------------------------------------------------------------------------
-# Both fields below are accepted by validate(), shown in the web dashboard,
-# and round-trip through the config API, but in THIS build nothing on the
-# wire consumes them (audit F-003 / K-6):
-#
-#   trusted_dns — the WFP DNS-hijack it would feed is a documented STUB, so
-#   port-53 redirection is NOT enforced. Destination lookup uses doh_server
-#   / relay_resolve_doh regardless.
-#
-#   rotate_ips  — no destination-IP rotation happens on the wire; the relay
-#   has a single fixed destination.
-#
-# They are listed here (they were missing from this example entirely, which
-# contradicted the dashboard and the mock schema — audit F-04) so operators
-# see every field the UI exposes. dpi_guard logs a warning at startup if
-# either is set to a non-empty value; leaving them at these defaults keeps
-# the log clean.
-#
-# NOTE: trusted_dns must stay commented out unless you put a VALID IP in it
-# — `trusted_dns = ""` fails validation (parse() rejects a non-IP value),
-# and an absent key means None. The commented line below shows the usage.
-rotate_ips = []   # must be valid IPs when non-empty; leave empty
-# trusted_dns = "9.9.9.9"  # uncomment ONLY with a valid IP; see note above
+# Optional relay-mode destination rotation. When non-empty, each new local
+# relay connection uses the next validated IP in this operator-owned list;
+# transparent WinDivert flows are never rewritten mid-connection. The list is
+# ignored while relay_enabled=false, so leave it empty in transparent mode.
+rotate_ips = []   # e.g. ["1.1.1.1", "1.0.0.1"]
+
+# trusted_dns is a legacy redirect setting and is deliberately NOT accepted
+# when non-empty. A user-mode WFP block cannot redirect; a signed kernel
+# callout would be required. Use doh_server / relay_resolve_doh instead.
+# Keeping the key commented preserves old-file diagnostics without promising
+# an unsupported feature. If an old file contains it, startup fails closed.
+# trusted_dns = "9.9.9.9"  # rejected: signed WFP redirect callout is absent
 
 # ---------------------------------------------------------------------------
 # RELAY MODE (patterniha-style local relay)
@@ -194,10 +187,12 @@ relay_emit_decoy = false
 # Leave this true. Setting it false falls through to relaying anyway.
 relay_require_inject = true
 
-# DNS-over-HTTPS endpoint. IP-literal URL avoids a bootstrap DNS lookup.
+# DNS-over-HTTPS endpoint. The built-in Cloudflare hostname keeps normal
+# TLS certificate/SNI verification; its resolver uses the pinned 1.1.1.1 and
+# 1.0.0.1 addresses, so the default still avoids mutable bootstrap DNS.
 # There is deliberately NO fallback to plaintext UDP/53. Only A queries are
 # sent (no AAAA). 127.0.0.1 / localhost / metadata hosts are rejected.
-doh_server = "https://1.1.1.1/dns-query"
+doh_server = "https://cloudflare-dns.com/dns-query"
 
 # ---------------------------------------------------------------------------
 # 25 NEW FEATURES (2026 upgrade)

@@ -1,22 +1,25 @@
 # KNOWN ISSUES — وضعیت و مستندات مشکلات واقعی
 
-آخرین به‌روزرسانی: ۲۰۲۶/۰۹/۰۷
+آخرین به‌روزرسانی: ۲۰۲۶/۰۹/۱۲
 
 این فایل بر اساس خروجی ابزار تحلیل ایستا `tools/gen_status.py` و بازبینی دقیق سورس‌کد به‌روزرسانی شده است.
 
 ---
 
-## 🟢 K-1 — محیط اجرای تست
+## 🟡 K-1 — محیط اجرای تست
 
-**وضعیت:** برطرف شد (RESOLVED)
+**وضعیت:** در این checkout فعلی `BLOCKED / UNVERIFIED`
 
-Rust stable 1.98.1 نصب شد و سوئیت تست **واقعاً اجرا** گردید:
-`cargo test` → ۳۸۳ پاس / ۰ شکست، `cargo clippy --all-targets` → ۰ خطا.
-نکتهٔ مهم این دور: پیش از ممیزی، سوئیت تست اصلاً کامپایل نمی‌شد
-(۳ خطای کامپایل: امضای `capture_loop` در تست استاب، نقض قرض‌گیری در
-`native_gui.rs`، importهای بلااستفادهٔ quic.rs) و ۹ تست هم شکست می‌خوردند
-(باگ u24 در `geedge.rs`، امتیازدهی تکراری ServerHello، تست redact قدیمی).
-همه رفع شدند؛ جزئیات در `STATUS.md` و `CHANGELOG.md`.
+در یک baseline تاریخی با Rust stable 1.98.1 روی Linux، `cargo test`
+**۴۳۱/۴۳۱** پاس شده بود. سورس فعلی **۴۴۸ تست اعلام‌شده** دارد؛ ۱۷ تست
+رگرسیون/تغییر این دور هنوز با cargo اجرا نشده‌اند. در محیط ممیزی فعلی
+`cargo`/`rustc`/`rustup` وجود ندارند، بنابراین build، test، fmt، clippy،
+audit و deny برای این checkout `NOT TESTED` هستند. سوئیت JavaScript فعلی
+جداگانه **۳۷۵/۳۷۵** پاس شده است. جزئیات و raw output در `STATUS.md` و
+گزارش تحویل همین ممیزی ثبت شده‌اند.
+
+ادعاهای ۳۸۳/۴۲۷/۴۳۱ در بخش‌های تاریخی این فایل و CHANGELOG فقط سابقه‌اند؛
+آنها نتیجهٔ اجرای فعلی نیستند.
 
 ---
 
@@ -74,7 +77,7 @@ Rust stable 1.98.1 نصب شد و سوئیت تست **واقعاً اجرا** گ
 - توابع `client_detect::any_running` و `first_running` در چرخهٔ شروع `main.rs` برای پایش کلاینت‌های پروکسی استفاده می‌شوند.
 - `proxy_cleanup::enable_dpi_guard_proxy` و `disable_dpi_guard_proxy` دارای تست‌های کامل ذخیره و بازیابی وضعیت هستند.
 - `mobile_gateway::connected_device_count` در اسکن دستگاه‌های LAN استفاده شد.
-- تمام ۴۰ ماژول مخزن دارای فراخوان‌های معتبر در کد یا تست‌ها هستند.
+- تمام ۴۲ ماژول مخزن دارای فراخوان‌های معتبر در کد یا تست‌ها هستند؛ عدد جاری را `tools/gen_status.py` تولید می‌کند.
 
 ---
 
@@ -84,8 +87,8 @@ Rust stable 1.98.1 نصب شد و سوئیت تست **واقعاً اجرا** گ
 
 | مؤلفه | وضعیت معماری | توضیحات |
 |---|---|---|
-| `dns_guard::block_port_53_except_localhost` | Stub مستند | مسدودسازی کامل پورت 53 در لایهٔ FFI نیازمند درایور WFP سطح کرنل است؛ هشدارهای لازم در لاگ و کد ثبت شده و استفاده از DoH/DoT توصیه می‌شود. |
-| `stealth::prevent_dns_leak` | Stub ارجاعی | ارجاع به تابع `dns_guard` فوق جهت شفافیت API. |
+| `dns_guard::block_port_53_except_localhost` | Partial; real user-mode WFP FFI, Windows runtime `[UNVERIFIED]` | Dynamic BFE session blocks outbound TCP/UDP 53 except loopback on IPv4 + IPv6. `trusted_dns` packet redirection still needs a signed kernel callout. |
+| `stealth::prevent_dns_leak` | Partial alias | Re-exports the WFP guard; behavior is subject to the same Windows/runtime limitation. |
 | `singleton` روی سیستم‌عامل‌های غیر ویندوز/یونیکس | پلتفرم نامتعارف | روی ویندوز با Win32 LockFile و روی یونیکس با `flock` پیاده‌سازی شده است. |
 | `self_update` | Check-Only | طبق نیازمندی‌های امنیتی، فقط بررسی نسخه از API گیت‌هاب انجام می‌شود و دانلود خودکار باینری انجام نمی‌گیرد. |
 
@@ -105,8 +108,8 @@ Rust stable 1.98.1 نصب شد و سوئیت تست **واقعاً اجرا** گ
 
 | موضوع | شرح | ریسک واقعی |
 |---|---|---|
-| TOCTOU پین درایور | هش SHA-256 فقط یک‌بار در بوت چک می‌شود؛ بین چک و باز کردن هندل، فایل قفل نشده است | پایین (فایل کنار exe، حملات محلی) |
-| `scanner.rs::cert_valid` | فیلد صرفاً گزارشی است و اعتبارسنجی گواهی واقعی انجام نمی‌دهد (doc ماژول بیش از پیاده‌سازی ادعا می‌کند) | اطلاعات، نه امنیتی |
+| TOCTOU پین درایور | برطرف شد در source: DLL/SYS قبل از hash با handle اشتراکیِ read-only باز می‌شوند، همان handleها تا پایان backend زنده می‌مانند، DLL با absolute path بار می‌شود و `GetModuleFileNameW` با مسیر مورد انتظار تطبیق می‌گیرد؛ Windows runtime هنوز `[UNVERIFIED]` است | اگر Windows runner خلاف این invariant را نشان دهد، startup fail-closed و release را متوقف کنید |
+| `scanner.rs::cert_valid` | برطرف شد در source: probe اکنون از ureq/rustls با SNI کاندید و resolver متصل به IP انتخاب‌شده استفاده می‌کند؛ پاسخ HTTP خطادار هم فقط پس از عبور زنجیره/نام TLS موفق محسوب می‌شود؛ runtime شبکه در این checkout `[UNVERIFIED]` است | اگر CA/TLS runner خلاف انتظار باشد، candidate را ناموفق نگه دارید و نتیجه را `DONE` نکنید |
 | مقایسهٔ TS/ابزارهای شروع | `client_detect` و `proxy_cleanup::save_state` به‌جای ترد اختصاصی، inline اجرا می‌شوند (مستند در STATUS) | صرفاً ترتیب، نه صحت |
 | بروت‌فورس WebUI | فقط تأخیر ثابت 80ms + اتصال‌های سریالی؛ lockout per-IP وجود ندارد (فقط loopback) | پایین |
 
@@ -114,9 +117,9 @@ Rust stable 1.98.1 نصب شد و سوئیت تست **واقعاً اجرا** گ
 
 ## ✅ خلاصهٔ اعتبارسنجی و وضعیت ماژول‌ها
 
-* **تعداد ماژول‌های فعال:** ۴۰ ماژول
-* **تعداد کل تست‌های اعلام‌شده:** ۳۸۳ تست
-* **تست‌های اجرا و پاس‌شده:** ۳۸۳ از ۳۸۳ (Rust 1.98.1، لینوکس)
-* **تعداد توابع مرده:** ۰
-* **خطای clippy:** ۰ (`--all-targets`)
-* **همگام‌سازی کامل فیلدهای Settings:** ۷۷ از ۷۷ فیلد در کد و داشبورد همگام هستند.
+* **تعداد ماژول‌های فعال:** ۴۲ ماژول (طبق `tools/gen_status.py`)
+* **تعداد کل تست‌های اعلام‌شده:** ۴۴۸ تست (تعریف‌شده در سورس، نه الزاماً اجراشده)
+* **تست‌های اجرا و پاس‌شده:** baseline تاریخی ۴۳۱ از ۴۳۱؛ ۱۷ تست/تغییر جدید این دور `[UNVERIFIED]`
+* **تعداد توابع مرده:** ۰ (استاتیک)
+* **خطای clippy:** `NOT TESTED` در checkout فعلی؛ baseline تاریخی ۰
+* **همگام‌سازی کامل فیلدهای Settings:** ۸۲ از ۸۲ فیلد در کد و داشبورد همگام هستند.

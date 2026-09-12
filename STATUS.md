@@ -1,29 +1,64 @@
 # STATUS — تنها منبع حقیقت
 
-آخرین به‌روزرسانی: ۲۰۲۶/۰۹/۰۹ · commit مبنا: `8087f4e` + ممیزی Master Prompt V2 (۲۰۲۶-۰۹-۰۹)
+آخرین به‌روزرسانی: ۲۰۲۶/۰۹/۱۲ · Rust last-run baseline: `07f2ddc` + ممیزی SENTRY؛ cargo/Windows هنوز `[UNVERIFIED]`
 
 > این فایل **تنها** مرجع وضعیت پروژه است. اگر فایل دیگری ادعای مغایری
 > دارد، آن فایل قدیمی است. اسناد تاریخی در `docs/archive/`.
 
 ---
 
-## ⚠️ وضعیت کلی پروژه: `TESTS_EXECUTED_LINUX / REAL_WIN_PENDING`
+## تغییرات این نوبت — ۲۰۲۶/۰۹/۱۲
 
-**توضیح وضعیت:** تمام ۴۱ ماژول روی ابزار پایدار Rust 1.98.1 (لینوکس)
-**واقعاً کامپایل و اجرا شده‌اند**: `cargo test --all-targets` → **۴۲۷ تست،
-۰ شکست** (۴۲۰ کتابخانه + ۷ باینری). `cargo clippy --all-targets -D warnings`
-→ **۰ خطا**. `cargo fmt --all -- --check` → **پاک**. سوئیت jsdom →
-**۳۶۹ تست، ۰ شکست**. مسیرهای وابسته به WinDivert فقط روی ویندوز اجرا
-می‌شوند و همچنان نیازمند آزمون میدانی ویندوز هستند.
+- **WFP:** `src/dns_guard.rs` از spec/stub به FFI واقعی `Fwpuclnt.dll` تبدیل شد.
+  نصب چهار filter در یک transaction انجام می‌شود: permit برای `127.0.0.1` و
+  `::1` و block برای outbound TCP/UDP port 53 در IPv4/IPv6. `WfpGuard` مسیر
+  cleanup عادی و `FWPM_SESSION_FLAG_DYNAMIC` مسیر cleanup پس از crash را دارد.
+  اجرای Windows/BFE هنوز `[UNVERIFIED]` است.
+- **DoH rebinding/TLS:** `src/doh.rs` برای هر تلاش `ureq::Agent` با resolver
+  سفارشی می‌سازد؛ endpoint پیش‌فرض `cloudflare-dns.com` با hostname دارای
+  گواهی TLS و آدرس‌های `1.1.1.1`/`1.0.0.1` pin می‌شود، و endpointهای custom
+  فقط یک بار resolve و قبل از connect با `netguard` فیلتر می‌شوند؛ redirect
+  خاموش است. unit testهای source اضافه شده‌اند، ولی cargo بعد از این
+  تغییرات اجرا نشده (`NOT TESTED`).
+- **Driver integrity:** `src/engine.rs` بدون دو pin مرتب DLL/SYS دیگر start
+  نمی‌کند. مسیر rollback عملیاتی: در صورت شکست فقط به commit قبل از این patch
+  برگردید؛ presence-only loading عمداً rollback امن محسوب نمی‌شود.
+- **مدرک اجرا:** `cd uitest && npm test` در این patch با **۳۷۵ passed،
+  ۰ failed** پاس شد؛ `gen_status.py --check`، `lint_docs.py`،
+  `git diff --check` و `python3 -m py_compile scripts/assert-e2e-pcap.py`
+  نیز پاس شدند. cargo/rustc در محیط موجود نیستند و Windows/WinDivert E2E،
+  fuzz و signing `[UNVERIFIED]` باقی می‌مانند.
+
+## ⚠️ وضعیت کلی پروژه: `JS_VERIFIED_2026-09-12 / RUST_LAST_RUN_2026-09-09 / REAL_WIN_PENDING`
+
+**توضیح وضعیت:** سوئیت کامل jsdom/Node داشبورد در همین patch در
+۲۰۲۶-۰۹-۱۲ **واقعاً اجرا شد**: ۳۷۵ چک، ۰ شکست (شامل regression XSS،
+raw-TOML confirmation و انتظار boot مقاوم). سوئیت Rust آخرین بار در
+۲۰۲۶-۰۹-۰۹ روی
+Rust 1.98.1 (لینوکس) اجرا و سبز شد؛ در محیط ممیزی ۲۰۲۶-۰۹-۱۱ **قابل اجرا
+نبود** (بدون دسترسی به crates.io — جزئیات در بخش «ممیزی SENTRY»). اعداد Rust
+پایین «آخرین اجرای ثبت‌شده» هستند، نه نتیجهٔ امروز.
+
+مسیرهای وابسته به WinDivert فقط روی ویندوز اجرا می‌شوند و همچنان نیازمند
+آزمون میدانی ویندوز هستند.
 
 ```bash
-# نتایج ثبت‌شدهٔ آخرین اجرا (لینوکس، Rust 1.98.1):
+# آخرین اجرای ثبت‌شدهٔ Rust (لینوکس، Rust 1.98.1، ۲۰۲۶-۰۹-۰۹):
 cargo fmt --all -- --check   # clean
 cargo clippy --all-targets -- -D warnings   # 0 error
-cargo test --all-targets     # 420 lib + 7 bin = 427 passed; 0 failed
-python3 tools/gen_status.py  # 41 modules, 427 tests declared, 0 dead fns
-cd uitest && npm test        # 369 passed; 0 failed
+cargo test --all-targets     # آخرین اجرای قبل از پچ‌های SENTRY: 431 passed; 0 failed
+python3 tools/gen_status.py  # current source: 42 modules, 448 tests declared, 0 dead fns
+
+# اجرای واقعی در ممیزی ۲۰۲۶-۰۹-۱۲ این patch:
+cd uitest && npm test                       # 375 passed; 0 failed  ✅
+python3 tools/gen_status.py --check        # up to date            ✅
+python3 tools/lint_docs.py                 # 0 parity violations   ✅
 ```
+
+> ⚠️ عددهای ۳۴۴، ۳۶۹، ۴۲۷ و ۴۳۱ که پیش‌تر در اسناد بودند تاریخی‌اند
+> و برای ادعاهای فعلی استفاده نمی‌شوند. `tools/gen_status.py` اکنون **۴۴۸**
+> تست اعلام‌شده را گزارش می‌کند؛ ۱۷ تست/تغییر تستیِ پس از baseline در این
+> checkout هنوز با cargo اجرا نشده‌اند.
 
 ---
 
@@ -52,15 +87,15 @@ ECH واقعی از نظر ریاضی خراب بود؛ ریشه‌ها با ش�
 |---|---|---|
 | F-02 | `src/*.rs` | `cargo fmt --check` روی ۲ فایل شکست می‌خورد → `cargo fmt --all` |
 | F-03 | ۹ خطا در ۴ فایل | `cargo clippy -D warnings` شکست می‌خورد (manual_is_multiple_of، repeat().take()، needless_range_loop، doc indentation، range contains) → همه رفع |
-| F-04 | `dpi_guard.toml.example` | `rotate_ips` و `trusted_dns` اصلاً در مثال نبودند در حالی که کنترل UI و ورودی mock دارند → با هشدار STUB مستند شدند؛ `trusted_dns` عمداً کامنت است چون `""` اعتبارسنجی را رد می‌کند (نکته در خود فایل) |
+| F-04 | `dpi_guard.toml.example` / relay | `rotate_ips` اکنون در relay mode واقعاً به‌صورت round-robin روی فهرست IPهای operator اعمال می‌شود؛ transparent flowها mid-connection بازنویسی نمی‌شوند. `trusted_dns` همچنان عمداً کامنت است و مقدار غیرخالی را رد می‌کند چون redirect به signed WFP callout نیاز دارد |
 | F-05 | `pipeline.rs` (بلوک ECH GREASE) | نتیجهٔ `build_outer_sni_for_ech` با `let _ =` دور ریخته می‌شد — فراخوانی مرده روی سیم؛ در مسیر NestedCloakِ شکست‌خورده + fronting، SNI واقعی می‌ماند → اکنون اعمال می‌شود |
-| F-01 | `tools/gen_status.py` | وقتی مخزن `.git` نداشته باشد، هد مخزن والد را بی‌صدا در کامنت می‌نویسد (محیط‌محور) → در این نشست مارکر کامیت به‌صورت دستی صادقانه شد؛ **رفع ابزار باقی است** (باید هد را از فایل sentinel بخواند یا "unknown" بگذارد) |
+| F-01 | `tools/gen_status.py` | برطرف شد: `git_head()` اکنون `--show-toplevel` را با ROOT مقایسه می‌کند و در checkout/tarball نامطمئن `unknown` می‌نویسد؛ marker دیگر از repository والد جعل نمی‌شود |
 
 ### تست‌های رگرسیون جدید (۳)
 
 - `hpke::tests::fe_algebraic_properties_hold` — جبر اندام‌ها (جابه‌جایی، توزیع‌پذیری، (a−b)+b==a، ایدمپوتنت بودن کدگذاری) روی ورودی‌های با slack، با RNG قطعی
 - `hpke::tests::fe_sub_borrow_wraps_correctly` — زنجیرهٔ قرض و مسیر منفی sub
-- `config::tests::shipped_toml_example_parses_and_documents_stub_fields` — مثالِ ارسالی همیشه parse+validate می‌شود و فیلدهای STUB را مستند نگه می‌دارد
+- `config::tests::shipped_toml_example_parses_and_documents_partial_fields` — مثالِ ارسالی همیشه parse+validate می‌شود و فیلدهای محدود/partial را مستند نگه می‌دارد
 
 ---
 
@@ -75,22 +110,24 @@ ECH واقعی از نظر ریاضی خراب بود؛ ریشه‌ها با ش�
 در برابر کد مرجع BoringSSL و NSS) و چند تداخل بین‌تکنیکی رفع شد.
 
 **وضعیت صادقانهٔ این دور:**
-- حدود ۲۶۰۰ خط کد و **۴۱ تست جدید** (مجموع تعریف‌شده: **۴۲۴ تست،
-  ۴۱ ماژول، ۰ تابع مرده، ۸۲ فیلد تنظیمات ↔ ۸۲ کنترل وب‌سایت** طبق
-  `tools/gen_status.py`).
+- حدود ۲۶۰۰ خط کد و **۴۱ تست جدید** (مجموع تعریف‌شده در همان زمان: ۴۲۴ تست؛
+  آن snapshot تاریخی `tools/gen_status.py` **۴۴۰** تست و **۴۱** ماژول
+  داشت؛ وضعیت فعلی در بخش بالاتر ثبت شده است، با ۰ تابع مرده و
+  ۸۲ فیلد تنظیمات ↔ ۸۲ کنترل وب‌سایت).
 - **این تست‌های Rust هنوز اجرا نشده‌اند** — این دور در محیط بدون زنجیرهٔ
   ابزار Rust نوشته شد؛ هیچ کامپایل/اجرای `cargo` صورت نگرفته است. اولین
   کار: `cargo test` + `cargo clippy` در محیط دارای ابزار، سپس به‌روزرسانی
-  اعداد این جدول. (سوئیت ۳۶۹ تستی جاوااسکریپت داشبورد روی همین کد
-  **اجرا و پاس** شده است.)
+  اعداد این جدول. (سوئیت **۳۶۹** تستی جاوااسکریپت داشبورد در آن اجرای
+  تاریخی روی همین کد **اجرا و پاس** شده بود؛ اجرای فعلی ۳۷۵ چک است.)
 - همهٔ تکنیک‌های جدید روی مسیر موجود سوارند (همان پروفایل‌های قبلی با
   پرچم‌های خاموش به‌صورت پیش‌فرض)؛ رفتار پیش‌فرض تغییری نکرده است.
 
 > **⬆️ تکمیل‌شده در دور ممیزی ۲۰۲۶-۰۹-۰۹:** این دور اکنون اجرا شد —
 > ۹ شکست (عمدتاً ریاضیاتِ `hpke.rs`) پیدا و رفع شد؛ جدول بالا برای
-> مرور تاریخی نگه داشته شده است. اعداد فعلی: **۴۲۷ تست (۴۲۴ اصلی + ۳
-> رگرسیون جدید)، همه اجرا و پاس؛ clippy = ۰؛ fmt = پاک**. جزئیات در
-> بخش «ممیزی Master Prompt V2» بالای همین فایل.
+> مرور تاریخی نگه داده شده است. اعداد فعلی: **۴۴۸ تست اعلام‌شده در سورس و
+> ۴۲ ماژول**؛ آخرین اجرای سبزِ baseline در ۲۰۲۶-۰۹-۰۹، ۴۳۱ تست تاریخی بود؛
+> ۱۷ تست/تغییر پس از آن baseline هنوز با cargo اجرا نشده‌اند. clippy = ۰ و fmt = پاک
+> مربوط به همان baseline هستند. جزئیات در بخش «ممیزی Master Prompt V2» بالای همین فایل.
 
 **تداخل‌های رفع‌شده در حسابرسی هماهنگی:**
 - نشت نام واقعی در ترکیب NestedCloak + ECH واقعی (حذف `0xFF01` از هر دو
@@ -103,22 +140,22 @@ ECH واقعی از نظر ریاضی خراب بود؛ ریشه‌ها با ش�
 
 ## جدول وضعیت ماژول‌ها و بخش‌های اصلی
 
-| بخش | Implementation | Tests نوشته‌شده | Tests اجراشده (JS/AST) | Real-world Windows | Status |
-|---|:---:|:---:|:---:|:---:|---|
-| Configuration + validation | ✅ | ✅ ۳۰ | ✅ پاس | ⏳ | `VERIFIED` |
-| Pipeline (هستهٔ پردازش پکت) | ✅ | ✅ ۴۱ | ✅ پاس | ⏳ | `VERIFIED` |
-| HPKE / رمز ECH واقعی | ✅ | ✅ ۱۲ | ✅ **پاس (بردارهای RFC)** | ⏳ | `VERIFIED` |
-| Web UI (backend) | ✅ | ✅ ۱۸ | ✅ پاس | ⏳ | `VERIFIED` |
-| Web UI (frontend) | ✅ | ✅ ۳۶۹ JS | ✅ **پاس** | ⏳ | `VERIFIED` |
-| Relay (رله TCP و fail-closed) | ✅ | ✅ ۹ | ✅ پاس | ⏳ | `VERIFIED` |
-| Fragmentation / parsing | ✅ | ✅ ۱۶ | ✅ پاس | ⏳ | `VERIFIED` |
-| DoH + DNS cache | ✅ | ✅ ۲۶ | ✅ پاس | ⏳ | `VERIFIED` |
-| `main.rs` (reconcile/hot-reload) | ✅ | ✅ ۶ | ✅ پاس | ⏳ | `VERIFIED` |
-| `native_gui.rs` | ✅ | ✅ ۷ | ✅ پاس | ⏳ | `VERIFIED` |
-| Engine / WinDivert FFI | ✅ | ❌ ۰ (FFI) | — | ⏳ | `BLOCKED` (ویندوز) |
-| DNS leak prevention | 🔴 STUB | ✅ ۳ (spec) | ✅ پاس | ❌ | `STUB` (مستند) |
-| WFP callout driver | ❌ | — | — | ❌ | `BLOCKED` (خارج از scope) |
-| Self-update (بررسی نسخه) | ✅ | ✅ ۱۱ | ✅ پاس | ⏳ | `VERIFIED` (check-only) |
+| بخش | Implementation | Tests source / evidence | Tests اجراشده (JS/AST) | Real-world Windows | Status |
+|---|:---:|---|:---:|:---:|---|
+| Configuration + validation | ✅ | `TEST_MATRIX.md` | ✅ JS/schema evidence | ⏳ | `UNTESTED` (Rust) |
+| Pipeline (هستهٔ پردازش پکت) | ✅ | `TEST_MATRIX.md` | `[UNVERIFIED]` Rust | ⏳ | `PARTIAL` (Windows pending) |
+| HPKE / رمز ECH واقعی | ✅ | `TEST_MATRIX.md` | `[UNVERIFIED]` Rust | ⏳ | `UNTESTED` (Rust) |
+| Web UI (backend) | ✅ | `TEST_MATRIX.md` | `[UNVERIFIED]` Rust | ⏳ | `UNTESTED` (Rust) |
+| Web UI (frontend) | ✅ | ۳۷۵ JS checks | ✅ **پاس** | ⏳ | `VERIFIED` |
+| Relay (رله TCP و fail-closed) | ✅ | `TEST_MATRIX.md` | `[UNVERIFIED]` Rust | ⏳ | `PARTIAL` (runtime pending) |
+| Fragmentation / parsing | ✅ | `TEST_MATRIX.md` | `[UNVERIFIED]` Rust | ⏳ | `UNTESTED` (Rust) |
+| DoH + DNS cache | ✅ | `TEST_MATRIX.md` | `[UNVERIFIED]` | `[UNVERIFIED]` | `PARTIAL` |
+| `main.rs` (reconcile/hot-reload) | ✅ | `TEST_MATRIX.md` | `[UNVERIFIED]` Rust | ⏳ | `UNTESTED` (Rust) |
+| `native_gui.rs` | ✅ | `TEST_MATRIX.md` | `[UNVERIFIED]` Rust | ⏳ | `UNTESTED` (Rust) |
+| Engine / WinDivert FFI | ✅ | `TEST_MATRIX.md` | — | ⏳ | `BLOCKED` (ویندوز) |
+| DNS leak prevention | 🟡 PARTIAL (real user-mode WFP FFI) | `TEST_MATRIX.md`; source-only | `[UNVERIFIED]` cargo | `[UNVERIFIED]` Windows/BFE | `PARTIAL` |
+| WFP callout driver | ❌ | خارج از scope | — | ❌ | `BLOCKED` (خارج از scope) |
+| Self-update (بررسی نسخه) | ✅ | `TEST_MATRIX.md` | `[UNVERIFIED]` Rust | ⏳ | `UNTESTED` (Rust, check-only) |
 
 ---
 
@@ -126,13 +163,13 @@ ECH واقعی از نظر ریاضی خراب بود؛ ریشه‌ها با ش�
 
 | معیار | مقدار |
 |---|---:|
-| ماژول‌های Rust | ۴۱ (۴۰ + `hpke`) |
-| `#[test]` تعریف‌شده در کد Rust | ۴۲۷ (۴۲۴ + ۳ رگرسیون ممیزی ۰۹-۰۹) |
-| تست‌های **اجرا و پاس‌شده** (cargo test، لینوکس) | **۴۲۷ از ۴۲۷** ✅ |
+| ماژول‌های Rust | **۴۲** (طبق `tools/gen_status.py`) |
+| `#[test]` تعریف‌شده در کد Rust | **۴۴۸** (طبق `tools/gen_status.py`) |
+| تست‌های **آخرین اجرای ثبت‌شده و پاس‌شده** (cargo test، لینوکس) | **۴۳۱ از ۴۳۱** ✅؛ ۱۷ تست/تغییر پس از آن [UNVERIFIED] |
 | توابع بدون هیچ فراخوان (Dead Functions) | **۰** ✅ (استاتیک) |
 | هشدار خطای clippy (-D warnings، --all-targets) | **۰** ✅ (اجرای ۲۰۲۶-۰۹-۰۹) |
 | `cargo fmt --check` | **پاک** ✅ (اجرای ۲۰۲۶-۰۹-۰۹) |
-| تست‌های UI (JavaScript) | ۳۶۹ (همه پاس — اجرای ۲۰۲۶-۰۹-۰۹) |
+| تست‌های UI (JavaScript) | ۳۷۵ (همه پاس — اجرای ۲۰۲۶-۰۹-۱۱) |
 | فیلدهای `Settings` | ۸۲ (۷۷ + ۵ پرچم جدید) |
 | ↳ خوانده‌شده توسط موتور | ۸۲ از ۸۲ (۱۰۰٪) ✅ |
 | کنترل‌های Web UI | ۸۲ (تطابق کامل و هماهنگی پرچم restart) ✅ |
@@ -148,7 +185,7 @@ ECH واقعی از نظر ریاضی خراب بود؛ ریشه‌ها با ش�
 ۳. **K-3 (تست‌های `main.rs` و `native_gui.rs`):** اضافه شدن تست‌های واحد جامع برای چرخه حیات رله، رفع مسمومیت قفل‌ها، و اعتبارسنجی تنظیمات.
 ۴. **K-4 (اتصال توابع تست‌محور به موتور):** یکپارچه‌سازی توابع geedge، quic، sequence، stealth و utls در پایپ‌لاین زنده.
 ۵. **K-5 (کدهای مرده):** رساندن تعداد توابع بدون فراخوان به ۰.
-۶. **K-6 (STUBهای اعلام‌شده):** شفاف‌سازی محدودیت‌های WFP، Singleton و self_update در مستندات و کد.
+۶. **K-6 (مرزهای باقی‌مانده):** اجرای Windows/BFE برای WFP هنوز `[UNVERIFIED]` است؛ redirect به `trusted_dns` به callout driver امضاشده نیاز دارد؛ Singleton و self_update محدودیت‌های مستند دارند.
 
 ---
 

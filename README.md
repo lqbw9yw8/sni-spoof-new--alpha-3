@@ -1,7 +1,7 @@
 # dpi_guard (Rust)
 
 Modular DPI-evasion engine. Crate name: `dpi_guard` (GitHub repo:
-[`lqbw9yw8/sni-spoof-new-5.6`](https://github.com/lqbw9yw8/sni-spoof-new-5.6)).
+[`lqbw9yw8/sni-spoof-new--alpha-3`](https://github.com/lqbw9yw8/sni-spoof-new--alpha-3)).
 Windows-only for packet capture/injection (WinDivert);
 every pure-logic module builds and tests on Linux/macOS/CI.
 
@@ -10,10 +10,27 @@ control panel.
 
 ---
 
-## ⚠️ وضعیت فعلی: `UNTESTED`
+## ⚠️ وضعیت فعلی: `JS_VERIFIED_2026-09-12 / RUST_LAST_RUN_2026-09-09 / REAL_WIN_PENDING`
 
-کد Rust در توسعهٔ اخیر **کامپایل نشده** و ۳۴۴ تست موجود **اجرا نشده‌اند**.
-پیش از اعتماد به هر ادعایی در این مخزن، `cargo test` را اجرا کنید.
+سه عدد مختلف برای «تعداد تست» در این مخزن دست‌به‌دست می‌شد (README: ۳۴۴،
+STATUS: ۴۲۷، TEST_MATRIX: ۴۳۱). منبع حقیقت **سورس** است:
+
+```bash
+python3 tools/gen_status.py --check   # 42 modules, 448 tests declared
+python3 tools/lint_docs.py            # prose may not drift from source
+```
+
+* **۴۴۸** تست Rust در سورس **نوشته** شده (`#[test]`). آخرین اجرای سبزِ
+  baseline ثبت‌شده ۲۰۲۶-۰۹-۰۹ روی Rust 1.98.1/لینوکس **۴۳۱ تست** بود؛
+  ۱۷ تست/تغییر تستیِ فعلی پس از آن baseline هنوز با cargo اجرا نشده‌اند
+  (`cargo` در این محیط موجود نیست).
+* **۳۷۵** چک jsdom/Node داشبورد (با regression XSS، raw-TOML confirmation و انتظار boot مقاوم) — این عدد
+  در همین patch در ۲۰۲۶-۰۹-۱۲ **اجرا و پاس شد** (`cd uitest && npm test`).
+* هیچ‌کدام از این‌ها ثابت نمی‌کند برنامه روی ویندوز با WinDivert درست کار
+  می‌کند. برای آن `STATUS.md` و `.github/workflows/e2e.yml` را ببینید.
+
+پیش از اعتماد به هر ادعایی، `cargo test --all-targets` را در محیطی که
+`crates.io` در دسترس است اجرا کنید.
 
 ## نقشهٔ مستندات
 
@@ -69,10 +86,10 @@ so a filter may whitelist the connection.
 (دکمهٔ سبز **Code → Download ZIP**):
 
 **Latest zip (branch `main`):**
-https://github.com/lqbw9yw8/sni-spoof-new-5.6/archive/refs/heads/main.zip
+https://github.com/lqbw9yw8/sni-spoof-new--alpha-3/archive/refs/heads/main.zip
 
 **Browse on GitHub:**
-https://github.com/lqbw9yw8/sni-spoof-new-5.6/tree/main
+https://github.com/lqbw9yw8/sni-spoof-new--alpha-3/tree/main
 
 ZIP را باز کن. پوشه را جایی ساده بگذار، مثلاً `C:\dpi_guard`.
 
@@ -82,12 +99,17 @@ Unzip it. Put the folder somewhere simple, e.g. `C:\dpi_guard`.
 >
 > **الف) روی خود ویندوز دابل‌کلیک:** `build-windows.bat` (Rust باید نصب باشد).
 >
-> **ب) گیت‌هاب برایت بسازد:** فایل `ci/build-windows.yml` را کپی کن به
-> `.github/workflows/build-windows.yml`، پوش کن، برو تب **Actions**،
-> آرتیفکت `dpi_guard-windows` را دانلود کن. WinDivert داخل آن نیست.
+> **ب) گیت‌هاب برایت بسازد:** workflow فعالِ
+> [`.github/workflows/build-windows.yml`](.github/workflows/build-windows.yml)
+> روی هر push اجرا می‌شود. در تب **Actions**، آرتیفکت `dpi_guard-windows` را
+> دانلود کن. WinDivert داخل آن نیست.
 >
 > There is no pre-built `.exe` in git. Run `build-windows.bat` on Windows,
-> or enable `ci/build-windows.yml` as a GitHub Action and download the artifact.
+> or let the active `.github/workflows/build-windows.yml` workflow build the
+> artifact. The release workflow is tag-driven and publishes SHA-256 sums.
+> The old `ci/*.yml` files are templates kept for reference; they are not the
+> workflows GitHub executes.
+
 
 ### ۲) ساختن برنامه / Build the program
 
@@ -136,7 +158,7 @@ relay_fake_sni      = "www.microsoft.com"
 relay_require_inject = true              # این را خاموش نکن
 enable_web_ui       = true
 web_ui_port         = 9090               # پورت داشبورد؛ با پورت رله یکی نباشد
-doh_server          = "https://1.1.1.1/dns-query"
+doh_server          = "https://cloudflare-dns.com/dns-query"
 ```
 
 - **پورت دلخواه است.** `40443` فقط یک پیشنهاد است. هر عدد آزاد بین ۱ تا ۶۵۵۳۵
@@ -185,7 +207,7 @@ of that screen means:
 | بخش پنجره / Screen part | توضیح / What it means |
 |---|---|
 | نوار عنوان `dpi_guard — Desktop Control Panel` | عنوان پنجره؛ فقط تأیید می‌کند این همان برنامه است. / Window title only — confirms this is the app. |
-| نوار تب‌ها: `Overview · Proxy & SNI · Traffic · Connection · Advanced · Raw TOML` | شش بخش تنظیمات؛ هرکدام گروهی از ۷۷ تنظیم `dpi_guard.toml` را نشان می‌دهد تا در یک صفحهٔ بلند گم نشوی. کلیک روی هرکدام محتوا را عوض می‌کند، پنجره را نمی‌بندد. / Six settings groups (out of the 77 total in `dpi_guard.toml`), split up so you don't scroll one giant page. Clicking a tab swaps content only. |
+| نوار تب‌ها: `Overview · Proxy & SNI · Traffic · Connection · Advanced · Raw TOML` | شش بخش تنظیمات؛ هرکدام گروهی از ۸۲ تنظیم `dpi_guard.toml` را نشان می‌دهد تا در یک صفحهٔ بلند گم نشوی. کلیک روی هرکدام محتوا را عوض می‌کند، پنجره را نمی‌بندد. / Six settings groups (out of the 82 total in `dpi_guard.toml`), split up so you don't scroll one giant page. Clicking a tab swaps content only. |
 | `dpi_guard` (تیتر بزرگ) + `Desktop control panel — no browser needed` | فقط توضیح می‌دهد این پنجره جایگزین داشبورد وب (`127.0.0.1:9090`) است؛ نیازی به مرورگر نیست. / Confirms this window replaces the web dashboard — no browser step needed. |
 | `● Stopped` (قرمز) / `● Running` (سبز) | وضعیت زندهٔ پردازش پس‌زمینه (`dpi_guard.exe --backend`، همان که پکت‌ها را با WinDivert می‌گیرد). قرمز = چیزی گرفته نمی‌شود. سبز = فیلتر فعال است. / Live status of the backend process that actually captures packets via WinDivert. Red = nothing is intercepted. Green = filtering is active. |
 | `Config file` | مسیر کامل فایل `dpi_guard.toml` که پنجره از آن می‌خواند/در آن می‌نویسد (مثلاً: `C:\dpi_guard\dpi_guard.toml`). / Full path of the `dpi_guard.toml` this window reads from and writes to. |
@@ -234,11 +256,11 @@ In v2rayN, set Remote DNS to DoH and Bootstrap DNS to an IP.
 
 http://127.0.0.1:9090
 
-توکن را بچسبان. همهٔ ۷۷ تنظیم از همین صفحه عوض می‌شوند.
+توکن را بچسبان. همهٔ ۸۲ تنظیم از همین صفحه عوض می‌شوند.
 دکمهٔ **ذخیره** را بزن. حدود ۱ ثانیه بعد اعمال می‌شود.
 
 Open **http://127.0.0.1:9090** (not `localhost`). Paste the token.
-All 77 settings are editable there. Click **Save**.
+All 82 settings are editable there. Click **Save**.
 
 ### ۸) اگر خراب شد / If it breaks
 
@@ -255,12 +277,13 @@ Set `RUST_LOG=dpi_guard=debug` if you want more log lines.
 ### ۹) چیزهایی که نباید فراموش کنی / Do not forget
 
 - این برنامه IP را قایم نمی‌کند.
-- پورت‌های ۲۲ و ۵۳ و ۳۳۸۹ هرگز گرفته نمی‌شوند.
+- WinDivert پورت‌های ۲۲ و ۵۳ و ۳۳۸۹ را نمی‌گیرد؛ DNS خروجیِ پورت ۵۳ در Windows با WFP (به‌جز loopback) مسدود می‌شود.
 - رله فقط به `127.0.0.1` گوش می‌دهد، نه به کل اینترنت.
 - فایل‌های `.dll` و `.sys` و `dpi_guard.toml` را داخل گیت نگذار.
 
 This program does **not** hide the destination IP.
-Ports 22, 53, and 3389 are never intercepted.
+WinDivert does not intercept ports 22, 53, or 3389; on Windows, outbound
+plaintext DNS on port 53 is blocked by WFP except to loopback.
 The relay listens on `127.0.0.1` only.
 
 راهنمای فارسیِ کامل‌تر: [`START_HERE.md`](docs/archive/START_HERE.md)
@@ -272,14 +295,18 @@ The relay listens on `127.0.0.1` only.
 
 This is a first pass, not a finished, field-tested tool. Two tiers:
 
-- **[DONE]** — implemented with unit tests in-tree (`cargo test` on any OS;
-  319 `#[test]` functions). Whether the suite was actually *executed* in an
-audit environment is recorded honestly in `STATUS.md` §3/§8 — run
-  `cargo test` yourself before trusting a count.
-- **[STUB]** — compiles, returns a typed `PlatformNotSupported` / `Driver`
-  error. Remaining stubs: WFP FFI (`FwpmEngineOpen0` / `FwpmFilterAdd0`),
-  the signed WFP callout driver for DNS redirect, and auto-spawning the
-  kill-switch process (command is built and sanitised, never executed).
+- **[IMPLEMENTED / verification-dependent]** — implementation and unit tests
+  are present in-tree; the current source declares **448** `#[test]`
+  functions. This is not evidence that the current checkout was executed:
+  the last recorded Rust baseline is **431/431**, while 16 current tests or
+  test changes remain `[UNVERIFIED]` because this environment has no
+  `cargo`. Run `cargo test --all-targets` before treating a module as
+  runtime-verified. See `STATUS.md` §3/§8.
+- **[PARTIAL]** — the dynamic user-mode WFP FFI now installs a real
+  fail-closed port-53 block (loopback exception, IPv4 + IPv6) on Windows.
+  The signed kernel callout needed for packet *redirection* to `trusted_dns`
+  is still not in this repository, and the kill-switch process is still not
+  auto-spawned (its command is built and sanitised, never executed).
 
 `engine.rs` is written against the published `windivert` 0.5.5 API
 (`WinDivert::network`, `recv(Some(&mut buf))`, `send`, `shutdown`,
@@ -296,8 +323,9 @@ Administrator.
   original packet. The fallback is logged.
 - **Filter.** The default filter is **all TCP and UDP ports in both
   directions, never loopback, always excluding SSH (22), DNS (53) and RDP
-  (3389)** (`NEVER_INTERCEPT_PORTS`), so the default can never cut the
-  operator's own remote access or plaintext DNS. Narrow it by setting
+  (3389)** (`NEVER_INTERCEPT_PORTS`). SSH/RDP remain available; the separate
+  Windows WFP guard handles plaintext DNS and blocks it except to loopback.
+  Narrow it by setting
   `intercept_all_tcp = false`, `intercept_all_udp = false` and listing
   ports in `intercept_ports`. When relay mode is on, the relay destination
   port is guaranteed to be included in the filter.
@@ -305,8 +333,12 @@ Administrator.
   in `dpi_guard.toml`, the watcher requests a WinDivert filter reload: the
   capture loop closes the old handle and reopens with the new filter
   (`engine::request_filter_reload`).
-- **Dynamic WFP session spec.** If/when WFP FFI is wired,
-  `dns_guard::init_wfp_hook_spec` requests a *dynamic* session.
+- **Dynamic WFP DNS guard.** On Windows startup,
+  `dns_guard::block_port_53_except_localhost` opens a real dynamic BFE
+  session, installs four transactional filters (loopback permit + port-53
+  block for IPv4 and IPv6), and fails closed if any WFP call fails. The
+  session is explicitly deleted on normal shutdown and is crash-cleaned by
+  `FWPM_SESSION_FLAG_DYNAMIC`.
 - **Graceful shutdown.** Ctrl+C (`tokio::signal`) sets a flag and calls
   `WinDivertShutdown`, which unblocks `recv` so diversion does not sit on
   the NIC until the next packet.
@@ -380,11 +412,13 @@ sha256sum WinDivert.dll WinDivert64.sys
 
 ## DNS leak warning (important)
 
-SNI mutation alone does **NOT** hide which domain you visit — the OS still
-sends a plaintext DNS query on UDP/53 that a local observer / DPI box can log.
-`dns_guard` in this crate currently only builds the WFP **specs** (allow
-127.0.0.1:53 + block :53); real WFP FFI that would actually block port 53
-needs a signed callout driver and is intentionally STUB.
+SNI mutation alone does **NOT** hide which domain you visit. On Windows,
+`dns_guard` now installs a real dynamic WFP policy that blocks outbound
+TCP/UDP port 53 except `127.0.0.1:53` and `[::1]:53`; startup fails closed if
+that policy cannot be installed. This is blocking, not redirection: the
+signed kernel callout required to redirect to `trusted_dns` is not shipped;
+non-empty `trusted_dns` values are rejected fail-closed rather than
+pretending that a user-mode block performs redirection.
 
 **What to do instead:**
 - Windows 11: Settings → Network → DNS → enable DNS over HTTPS (DoH) to
@@ -393,8 +427,9 @@ needs a signed callout driver and is intentionally STUB.
   [AdGuard](https://adguard.com/) or YogaDNS with DoH/DoT upstream
 - Verify: https://www.cloudflare.com/ssl/encrypted-sni/ and `https://1.1.1.1/help`
   should show "Using DNS over HTTPS (DoH) - Yes"
-- `trusted_dns` in `dpi_guard.toml` is only a *documented target* for future
-  hijack specs; it does NOT enable DoH by itself.
+- `trusted_dns` in `dpi_guard.toml` is a legacy redirect key. Non-empty
+  values are rejected because the signed WFP callout is not shipped; it does
+  NOT enable DoH. Use `doh_server` / `relay_resolve_doh` instead.
 
 If you keep plain UDP/53, DPI sees the domain even if SNI is mutated.
 
@@ -412,10 +447,11 @@ pre-built WinDivert binaries. This crate:
   redacted except the one-time auto-generated print.
 - gitignores `*.dll` / `*.sys` / `dpi_guard.toml`
 - `version_check` searches **only the executable directory** (never cwd)
-  and refuses to start if the driver files are missing. When
-  `win_divert_sha256` pins are configured, every driver binary is
-  SHA-256 compared in constant time against the pin list; files over
-  16 MiB are refused.
+  and refuses to start if the driver files are missing. It also refuses
+  to start unless `win_divert_sha256` contains exactly two pins. Every
+  driver binary is SHA-256 compared in constant time against the ordered
+  two-pin list (`WinDivert.dll`, then `WinDivert64.sys`); files over 16 MiB
+  are refused.
 - a missing default `dpi_guard.toml` uses compiled defaults; an
   **invalid or explicitly-passed missing** config file is fail-closed
   (process exits). Unknown TOML keys are rejected.
@@ -459,7 +495,7 @@ token; leave `web_ui_token` empty to auto-generate one (printed to the
 console/stderr — deliberately never written to the log file). A configured token must be at least 16 printable ASCII characters.
 
 **Every setting is editable.** The page (`src/webui/index.html`, embedded
-with `include_str!`) declares a schema covering all 77 `Settings` fields,
+with `include_str!`) declares a schema covering all 82 `Settings` fields,
 grouped into twelve sections (core, fingerprint, anti-fingerprint, ISP,
 port scope, TLS, desync, relay, DNS, web-UI, ops, tools) across the
 Proxy & SNI / Traffic / Connection / Advanced tabs, in Persian RTL,
@@ -489,7 +525,7 @@ correctness, redaction, and the 401 path. A real TOML parser
 (`@iarna/toml`) validates everything the page emits.
 
 ```bash
-cd uitest && npm install && npm test   # 104 UI + 56 schema + 67 v2rayN + 60 resilience + 56 settings + 26 status = 369 checks
+cd uitest && npm ci && npm test   # 110 UI + 56 schema + 67 v2rayN + 60 resilience + 56 settings + 26 status = 375 checks
 npm run test:v2rayn                    # just the v2rayN coexistence suite
 npm run preview                        # click it: http://127.0.0.1:8787
 ```
@@ -502,35 +538,39 @@ checks the documented v2rayN setup against the code's defaults. True
 end-to-end interop needs Windows + WinDivert + v2rayN; the manual
 procedure is printed at the end of that file.
 
-`.github/workflows/ci.yml` (copy it from `ci/github-actions.yml` if your clone does not have it) runs both jobs (`cargo test` and the jsdom suite) on every push/PR.
+`.github/workflows/ci.yml` runs Rust fmt/build/test/clippy, the jsdom suite, and documentation parity checks on every push/PR. `.github/workflows/build-windows.yml` builds the Windows artifact; `.github/workflows/e2e.yml` is the manual/scheduled WinDivert field job.
 
 ## Module map (2025-2026 upgrades)
 
+> **Current verification boundary:** the Rust toolchain is absent in this checkout. `UNTESTED` means implementation is present but current Rust tests were not executed; it is not a green runtime claim. Windows/WinDivert rows remain separately unverified.
+
 | File | Role | Status |
 |---|---|---|
-| `sni_mutations.rs` | 12+ SNI mutations + 7 profiles (Stealth, ChinaGfw, RussiaDpi, Aggressive, ChinaRegional, Henan, **NestedCloak**) + SNI disguise GREASE/private | DONE |
-| `fragmentation.rs` | TLS parse, SNI splice + length rewrite, TCP-level split + **disguise_sni_extension_type**, **front_sni_with_benign**, **inject_hidden_sni_in_unknown_ext** | DONE + NEW |
-| `packet.rs` | IPv4/IPv6 + TCP/UDP parse, checksums, segmentation, l3_slice | DONE |
-| `quic.rs` | **NEW**: QUIC Initial detection, port blindspot (src<=dst bypass per USENIX 2025), UDP src rewrite, decoy, QuicPortMapper | DONE + NEW |
-| `pipeline.rs` | live packet processor + QUIC bypass + SNI fronting/disguise + combined TCP+TLS frag for Henan | DONE + ENHANCED |
-| `fail_open.rs` | panic/Err → original packet | DONE |
-| `sequence.rs` | decoy / SEQ / TTL | DONE |
-| `fooling.rs` | checksum/RST/SYN-ACK/disorder/UDP-len builders | DONE |
-| `strategy.rs` | per-domain scoring, A/B block-type | DONE |
+| `sni_mutations.rs` | 12+ SNI mutations + 7 profiles (Stealth, ChinaGfw, RussiaDpi, Aggressive, ChinaRegional, Henan, **NestedCloak**) + SNI disguise GREASE/private | UNTESTED |
+| `fragmentation.rs` | TLS parse, SNI splice + length rewrite, TCP-level split + **disguise_sni_extension_type**, **front_sni_with_benign**, **inject_hidden_sni_in_unknown_ext** | UNTESTED + NEW |
+| `packet.rs` | IPv4/IPv6 + TCP/UDP parse, checksums, segmentation, l3_slice | UNTESTED |
+| `quic.rs` | **NEW**: QUIC Initial detection, port blindspot (src<=dst bypass per USENIX 2025), UDP src rewrite, decoy, QuicPortMapper | UNTESTED + NEW |
+| `pipeline.rs` | live packet processor + QUIC bypass + SNI fronting/disguise + combined TCP+TLS frag for Henan | UNTESTED + ENHANCED |
+| `fail_open.rs` | panic/Err → original packet | UNTESTED |
+| `sequence.rs` | decoy / SEQ / TTL | UNTESTED |
+| `fooling.rs` | checksum/RST/SYN-ACK/disorder/UDP-len builders | UNTESTED |
+| `strategy.rs` | per-domain scoring, A/B block-type | UNTESTED |
 | `stealth.rs` | jitter, options, GREASE, hash, kill-switch string | PARTIAL |
-| `connection.rs` | health, IP rotate, LRU tickets, backoff | DONE |
-| `dns_guard.rs` | WFP specs | spec DONE, FFI STUB |
+| `connection.rs` | health, IP rotate, LRU tickets, backoff | UNTESTED |
+| `dns_guard.rs` | Dynamic WFP port-53 block with loopback exception (IPv4 + IPv6); legacy `trusted_dns` redirect is rejected until a signed callout exists | PARTIAL, Windows runtime unverified |
+| `doh.rs` | DoH A-record lookup plus per-request resolver filtering of endpoint `SocketAddr`s | PARTIAL, cargo/runtime NOT TESTED after hardening |
 | `engine.rs` | WinDivert I/O | written to 0.5.5 API, unverified on Windows |
-| `engine_stub.rs` | same signatures, PlatformNotSupported | DONE |
-| `config.rs` | TOML + validated fields + hot reload + new QUIC/fronting options | DONE + ENHANCED |
-| `integrity.rs` | SHA-256 pin compare (constant-time) | DONE |
-| `hpke.rs` | **NEW 2026**: pure-Rust HPKE base mode for real ECH — X25519, HKDF-SHA256, ChaCha20Poly1305 (RFC 7748/5869/8439/9180 vectors) | DONE |
-| `webui.rs` | opt-in 127.0.0.1 dashboard + 7 profiles | DONE + ENHANCED |
-| `netguard.rs` | SSRF guards: forbidden dests/hostnames, DoH URL + relay IP validation | DONE |
-| `singleton.rs` | one-instance file lock next to the exe (flock/CreateFileW) | DONE |
-| `autottl.rs` | learn decoy TTL from inbound hop count | DONE |
-| `http_host.rs` | HTTP Host-line split trick + `sni_only`/`sni_except` filters | DONE |
-| `error.rs` | crate error type | DONE |
+| `engine_stub.rs` | same signatures, PlatformNotSupported | STUB |
+| `config.rs` | TOML + validated fields + hot reload + new QUIC/fronting options | UNTESTED + ENHANCED |
+| `integrity.rs` | SHA-256 pin compare and bounded driver-file hashing | UNTESTED |
+| `observability.rs` | rotating JSON-lines metrics and bounded runtime counters | PARTIAL, cargo/runtime unverified |
+| `hpke.rs` | **NEW 2026**: pure-Rust HPKE base mode for real ECH — X25519, HKDF-SHA256, ChaCha20Poly1305 (RFC 7748/5869/8439/9180 vectors) | UNTESTED |
+| `webui.rs` | opt-in 127.0.0.1 dashboard + 7 profiles | UNTESTED + ENHANCED |
+| `netguard.rs` | SSRF guards: forbidden dests/hostnames, DoH URL + relay IP validation | UNTESTED |
+| `singleton.rs` | one-instance file lock next to the exe (flock/CreateFileW) | UNTESTED |
+| `autottl.rs` | learn decoy TTL from inbound hop count | UNTESTED |
+| `http_host.rs` | HTTP Host-line split trick + `sni_only`/`sni_except` filters | UNTESTED |
+| `error.rs` | crate error type | UNTESTED |
 
 ### New profiles (2025 research)
 
@@ -628,7 +668,9 @@ Safety properties (differences from the reference implementation):
   and that confirmation never arrives, the relay drops the connection
   **without copying a single byte of the real ClientHello**.
 - Domain resolution is **DoH-only** (`relay_resolve_doh`, default
-  `https://1.1.1.1/dns-query`); there is **no** plaintext-DNS fallback,
+  `https://cloudflare-dns.com/dns-query`); the built-in endpoint keeps the
+  certificate-bearing hostname for TLS verification while pinning
+  `1.1.1.1`/`1.0.0.1` before connect. There is **no** plaintext-DNS fallback,
   no AAAA queries, and loopback/metadata answers are rejected.
 - Configuring `relay_connect_host` as an IP literal skips DNS entirely
   (zero leak). Loopback/link-local/multicast/metadata destinations are
@@ -643,10 +685,14 @@ Safety properties (differences from the reference implementation):
 > keep `relay_resolve_doh = true`; (2) the injected fake uses the real
 > connection's IP — this is SNI spoofing, not IP hiding; the DPI still sees
 > the destination IP. Hiding the destination IP is a different technique
-> (e.g. VLESS Reality) and out of scope here. (3) For zero DNS leakage, point
-> `doh_server` at an IP-literal endpoint (`https://1.1.1.1/dns-query`), since
-> the DoH endpoint's own hostname is otherwise resolved by the system resolver
-> first (that leaks only the endpoint name, not your target domain).
+> (e.g. VLESS Reality) and out of scope here. (3) Hostname DoH endpoints are
+> supported: the per-request `ureq::Agent` filters every resolver
+> `SocketAddr` with `netguard` before connecting and disables redirects, so a
+> DNS-rebinding answer cannot move the request to a forbidden address. The
+> built-in `cloudflare-dns.com` endpoint additionally uses pinned
+> `1.1.1.1`/`1.0.0.1` addresses while retaining the hostname for TLS SNI and
+> certificate verification. Custom endpoints use their one checked resolver
+> result; there is no second lookup after validation.
 
 Extra relay toggles (defense-in-depth, both off by default):
 
@@ -659,7 +705,7 @@ Extra relay toggles (defense-in-depth, both off by default):
 ### Dashboard config editing & Start/Stop
 
 With `enable_web_ui = true`, the dashboard (`http://127.0.0.1:9090`) edits
-**every** setting: 77 schema-driven controls in twelve sections, plus an
+**every** setting: 82 schema-driven controls in twelve sections, plus an
 advanced full-config TOML editor. There is no separate "Start relay" /
 "Stop relay" button any more — `relay_enabled` is just another switch, and
 because Save writes `dpi_guard.toml` through the exact same validated parse
@@ -709,3 +755,4 @@ Config: `enable_combined_fragmentation = true` (default ON).
 ## License
 
 MIT. See `LICENSE`.
+CENSE`.

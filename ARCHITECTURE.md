@@ -1,7 +1,7 @@
 # ARCHITECTURE — وابستگی‌ها و مسیر اجرا
 
 <!-- بخش گراف از tools/status.json تولید شده -->
-<!-- commit: 84468ac + ممیزی ۲۰۲۶-۰۹ -->
+<!-- source snapshot: 5231c27 + docs audit ۲۰۲۶-۰۹ -->
 
 ## چرخهٔ حیات خروج (Fail-Closed Lifecycle)
 
@@ -112,7 +112,9 @@ panic unwind    ─┘                       ▼
   (WinDivert FFI) و `singleton.rs` (`flock`/`CreateFileW`) دوباره فعالش می‌کنند.
 * `engine_stub.rs` نسخهٔ غیرویندوزی `engine.rs` است تا crate روی Linux
   کامپایل و تست شود.
-* `pipeline.rs` بزرگ‌ترین ماژول است (۲٬۵۴۵ خط) و بیشترین تست را دارد (۴۱).
-  هر تغییری در آن باید با تست همراه باشد.
+* `pipeline.rs` بزرگ‌ترین ماژول است (۳٬۳۱۹ خط؛ جزئیات جاری در
+  `TEST_MATRIX.md`) و ۵۰ تست در سورس دارد. این اعداد شمارش ایستا هستند؛
+  هر تغییری در آن باید با تست همراه باشد و اجرای فعلی Rust در این محیط
+  `NOT TESTED` است.
 * `error.rs` را ۲۹ ماژول استفاده می‌کنند — افزودن variant امن است،
   تغییر یا حذف variant نیست.

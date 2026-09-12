@@ -20,8 +20,8 @@
 | واقعیت | پیامد |
 |---|---|
 | کد **Windows-only** است (WinDivert) | روی Linux فقط ماژول‌های منطق خالص کامپایل می‌شوند |
-| `engine.rs` و `singleton.rs` تنها جاهای `unsafe` هستند | تغییر در آن‌ها ریسک بالاتری دارد |
-| WFP callout driver **خارج از scope** است | `dns_guard` هرگز کامل نخواهد شد |
+| `engine.rs`، `dns_guard.rs` و `singleton.rs` تنها مرزهای `unsafe` هستند | تغییر در آن‌ها ریسک بالاتری دارد؛ FFI هر سه باید مستقل بررسی شود |
+| WFP callout driver **خارج از scope** است | `dns_guard` می‌تواند port-53 block کاربر-فضا را نصب کند، اما redirect به `trusted_dns` کامل نمی‌شود |
 | بسیاری از محیط‌های sandbox به `crates.io` دسترسی ندارند | ممکن است اصلاً نتوانید `cargo` را اجرا کنید |
 
 **اگر نتوانستید `cargo test` را اجرا کنید، این را با صدای بلند بگویید.**

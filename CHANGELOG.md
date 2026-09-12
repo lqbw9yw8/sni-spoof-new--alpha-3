@@ -4,6 +4,50 @@
 
 > وضعیت هر ورودی طبق `AI_RULES.md` بخش ۳ برچسب می‌خورد.
 
+## [0.1.0] — ۲۰۲۶-۰۹-۱۱
+
+Baseline source release. Publish only after the Windows CI/release workflow
+has produced and verified the signed/checksummed artifact.
+
+## [Unreleased] — DNS enforcement and resolver hardening (۲۰۲۶-۰۹-۱۲) — `PARTIAL_UNVERIFIED`
+
+- `src/dns_guard.rs` now contains real `Fwpuclnt.dll` FFI: one dynamic BFE
+  transaction installs IPv4/IPv6 loopback permits and port-53 block filters;
+  `WfpGuard` deletes them on normal shutdown and the dynamic session cleans
+  them after a crash. `trusted_dns` packet redirection remains `[UNVERIFIED]`
+  because it needs a signed kernel callout.
+- `src/doh.rs` now uses a per-attempt `ureq::Agent` resolver. The built-in
+  `cloudflare-dns.com` endpoint keeps the TLS certificate/SNI hostname but
+  uses pinned `1.1.1.1`/`1.0.0.1` addresses; custom endpoint `SocketAddr`s
+  are resolved once, filtered with `netguard` before ureq connects, and
+  redirects are disabled. There is no second lookup after validation.
+- Windows `engine::version_check` now fails closed when the ordered DLL/SYS
+  SHA-256 pin list is empty; presence-only driver loading is removed.
+- `rotate_ips` is now a real relay-mode round-robin over validated,
+  operator-supplied destination IPs; transparent flows deliberately keep their
+  established 4-tuple. The setting is no longer an inert warning.
+- Verification in this checkout: `cd uitest && npm test` passed (all six
+  suites); `python3 tools/gen_status.py --check`, `python3 tools/lint_docs.py`,
+  `git diff --check` passed. Rust `cargo`/`rustc` are absent (`NOT TESTED`),
+  and Windows/BFE/WinDivert E2E is `[UNVERIFIED]`.
+- Rollback: revert this changelog entry together with the source/docs patch;
+  do not remove the signed-driver pins or restore presence-only loading in a
+  deployed Windows binary.
+
+## [Unreleased] — SENTRY audit hardening (۲۰۲۶-۰۹-۱۱) — `PARTIAL_UNVERIFIED_RUST`
+
+- فعال‌سازی workflowهای واقعی در `.github/workflows/` برای CI، Windows build،
+  E2E و semver release؛ artifact ویندوز checksum دارد و WinDivert جدا می‌ماند.
+- `tools/gen_status.py --check` و `tools/lint_docs.py` برای جلوگیری از drift
+  آمار/لینک/بایگانی؛ README به repo canonical و ۸۲ فیلد هماهنگ شد.
+- جلوگیری از legacy IPv4 SSRF forms، pinهای ordered DLL/SYS، سقف و پاک‌سازی
+  QuicPortMapper، و parse/checksumهای length-safe؛ regression XSS در jsdom.
+- `tools/gen_status.py` اکنون **۴۴۸ تست و ۴۲ ماژول** Rust اعلام می‌کند؛ baseline
+  قبلی ۴۳۱/۴۳۱ سبز بود و ۱۷ تست/تغییر جدید این دور [UNVERIFIED] مانده‌اند.
+- Rust build/test جدید در محیط این نشست اجرا نشد: `cargo` و `rustup` نصب نبودند
+  و crates.io/static.rust-lang.org با `SSL_ERROR_SYSCALL` در دسترس نبودند.
+- jsdom پس از regressionهای XSS، raw-TOML confirmation و boot از ۳۶۹ به **۳۷۵/۳۷۵** رسید.
+
 ## [Unreleased] — ممیزی Master Prompt V2 (۲۰۲۶-۰۹-۰۹) — `FIXED_AND_VERIFIED`
 
 نشست ممیزی جنایی (Master Prompt V2) دور NestedCloak را با اجرای واقعی
@@ -34,7 +78,7 @@
 ### Added
 - ۳ تست رگرسیون: `fe_algebraic_properties_hold`،
   `fe_sub_borrow_wraps_correctly`،
-  `shipped_toml_example_parses_and_documents_stub_fields`.
+  `shipped_toml_example_parses_and_documents_partial_fields`.
 
 ### نتیجهٔ نهایی این دور
 `cargo test --all-targets` → **۴۲۷/۴۲۷ پاس** · clippy → **۰** · fmt →
