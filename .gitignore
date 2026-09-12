@@ -19,5 +19,7 @@ Thumbs.db
 uitest/node_modules/
 # Rust
 Cargo.lock
+fuzz/artifacts/
+fuzz/corpus/
 # Logs
 *.log
