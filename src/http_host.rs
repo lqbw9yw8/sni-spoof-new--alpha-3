@@ -1,4 +1,4 @@
-//! http_host — HTTP `Host` splitting trick + SNI filter lists. [DONE]
+//! http_host — HTTP `Host` splitting trick + SNI filter lists. [UNTESTED]
 //!
 //! Two small, independently-testable helpers used by the relay/pipeline:
 //!

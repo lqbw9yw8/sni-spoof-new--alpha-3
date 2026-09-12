@@ -239,13 +239,36 @@ impl QuicPortMapper {
         orig_sport: u16,
         spoofed: u16,
     ) {
+        let forward_key = (client_ip, server_ip, server_port, orig_sport);
+        let reverse_key = (server_ip, client_ip, server_port, spoofed);
+
+        // Replacing either side must remove its old counterpart first. Without
+        // this, a re-used flow key leaves a stale reverse entry that can route
+        // a later server packet to the wrong client port.
+        if let Some((old_spoofed, _)) = self.forward.remove(&forward_key) {
+            self.reverse.remove(&(server_ip, client_ip, server_port, old_spoofed));
+        }
+        if let Some(old_orig) = self.reverse.remove(&reverse_key) {
+            self.forward
+                .remove(&(client_ip, server_ip, server_port, old_orig));
+        }
+
+        // Enforce the bound at the owner of the table, not only at one
+        // pipeline call site. This keeps every future caller bounded too.
+        if self.forward.len() >= MAX_QUIC_MAPS {
+            if let Some(old_key) = self
+                .forward
+                .iter()
+                .min_by_key(|(_, (_, last_seen))| *last_seen)
+                .map(|(key, _)| *key)
+            {
+                self.remove_by_orig(old_key.0, old_key.1, old_key.2, old_key.3);
+            }
+        }
+
         let now = Instant::now();
-        self.forward.insert(
-            (client_ip, server_ip, server_port, orig_sport),
-            (spoofed, now),
-        );
-        self.reverse
-            .insert((server_ip, client_ip, server_port, spoofed), orig_sport);
+        self.forward.insert(forward_key, (spoofed, now));
+        self.reverse.insert(reverse_key, orig_sport);
     }
 
     /// Spoofed port for an outbound flow, refreshing its idle timestamp.
@@ -434,6 +457,33 @@ mod tests {
         );
         assert_eq!(m.len(), 0);
         assert!(m.get_original(server, client, 443, 443).is_none());
+    }
+
+    #[test]
+    fn mapper_replacement_removes_stale_reverse_entry() {
+        let mut m = QuicPortMapper::new();
+        let client: IpAddr = "10.0.0.1".parse().unwrap();
+        let server: IpAddr = "1.1.1.1".parse().unwrap();
+        m.insert(client, server, 443, 54321, 443);
+        m.insert(client, server, 443, 54321, 442);
+        assert_eq!(m.len(), 1);
+        assert!(m.get_original(server, client, 443, 443).is_none());
+        assert_eq!(m.get_original(server, client, 443, 442), Some(54321));
+    }
+
+    #[test]
+    fn mapper_insert_enforces_global_cap_and_evicts_oldest() {
+        let mut m = QuicPortMapper::new();
+        let client: IpAddr = "10.0.0.1".parse().unwrap();
+        let server: IpAddr = "1.1.1.1".parse().unwrap();
+        for i in 0..MAX_QUIC_MAPS {
+            m.insert(client, server, 443, 10_000 + i as u16, 1_000 + i as u16);
+        }
+        assert_eq!(m.len(), MAX_QUIC_MAPS);
+        m.insert(client, server, 443, 60_000, 401);
+        assert_eq!(m.len(), MAX_QUIC_MAPS);
+        assert!(m.get_spoofed(client, server, 443, 10_000).is_none());
+        assert_eq!(m.get_spoofed(client, server, 443, 60_000), Some(401));
     }
 
     #[test]

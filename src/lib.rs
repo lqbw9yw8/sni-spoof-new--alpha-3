@@ -4,10 +4,12 @@
 //! OS. Packet capture/injection needs Windows + WinDivert and only
 //! compiles on `cfg(windows)`.
 //!
-//! STATUS LEGEND used in doc comments:
-//!   [DONE]    - implemented and unit tested in this build.
-//!   [PARTIAL] - implemented, with documented limits.
-//!   [STUB]    - compiles, returns a typed error, needs Windows/WFP FFI.
+//! STATUS LEGEND used in doc comments (these are labels, not current test
+//! results):
+//!   `DONE`    - implemented and unit tested in a verified build.
+//!   `PARTIAL` - implemented, with documented limits.
+//!   `STUB`    - compiles, returns a typed error, needs Windows/WFP FFI.
+//!   `UNTESTED` - implementation present; current tests were not executed.
 //! # dpi_guard
 //!
 //! A patterniha-style local SNI-spoofing relay and DPI-evasion engine.
@@ -16,8 +18,9 @@
 //! Packet capture/injection is Windows-only (WinDivert); all pure-logic
 //! modules build and unit-test on Linux/macOS/CI.
 //!
-//! `#![deny(unsafe_code)]` applies crate-wide. Only two modules opt back in:
-//! `engine.rs` (WinDivert FFI) and `singleton.rs` (`flock`/`CreateFileW`).
+//! `#![deny(unsafe_code)]` applies crate-wide. The FFI boundary is confined
+//! to `engine.rs` (WinDivert), `dns_guard.rs` (WFP), and `singleton.rs`
+//! (`flock`/`CreateFileW`).
 #![deny(unsafe_code)]
 
 pub mod autottl;
@@ -38,6 +41,7 @@ pub mod http_host;
 pub mod integrity;
 pub mod native_gui;
 pub mod netguard;
+pub mod observability;
 pub mod packet;
 pub mod pipeline;
 pub mod quic;
@@ -68,10 +72,12 @@ pub use engine_stub as engine;
 
 pub use error::DpiGuardError;
 
-/// The compiled-in default filter diverts **all** TCP and UDP ports in both
-/// directions, excludes loopback, and never touches SSH (22), DNS (53), or
-/// RDP (3389). This matches the "all ports minus never-touch" default the
-/// operator expects from a patterniha-style relay; narrow it down via
+/// The compiled-in WinDivert filter diverts **all** TCP and UDP ports in
+/// both directions, excludes loopback, and never touches SSH (22), DNS (53),
+/// or RDP (3389). Windows' separate WFP guard handles outbound plaintext DNS;
+/// this filter only controls packet diversion. This matches the "all ports
+/// minus never-touch" default the operator expects from a patterniha-style
+/// relay; narrow it down via
 /// `intercept_ports` in `dpi_guard.toml` if needed.
 pub const DEFAULT_FILTER: &str = "!loopback and (\
      (tcp and tcp.DstPort != 22 and tcp.SrcPort != 22 and tcp.DstPort != 53 and tcp.SrcPort != 53 and tcp.DstPort != 3389 and tcp.SrcPort != 3389) \
@@ -161,6 +167,9 @@ pub fn init_logging() {
     )
     .is_test(false)
     .try_init();
+    if let Err(e) = observability::init() {
+        log::warn!("bounded JSON-lines observability log unavailable: {e}");
+    }
 }
 
 /// Recover a `Mutex` after a panic in another thread. Poisoning must not

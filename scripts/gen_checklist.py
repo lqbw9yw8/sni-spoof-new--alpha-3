@@ -107,7 +107,7 @@ TEMPLATES = [
     ("Network", "DoH response body capped at 64 KiB", CWE, "CWE-770"),
     ("Network", "DoH loopback/metadata answers refused", CWE, "CWE-918"),
     ("Network", "No REALITY/Hysteria/TUIC support — scope enforced", NIST, "800-53 SA-15"),
-    ("Network", "DNS WFP block is a STUB; documented honestly, not claimed", CWE, "CWE-1188"),
+    ("Network", "Windows WFP user-mode DNS block is real; BFE runtime and trusted_dns redirect remain [UNVERIFIED]/callout-limited", CWE, "CWE-1188"),
 
     # --- Crypto / protocol ---
     ("Crypto", "Driver integrity verified by SHA-256 pin list", NIST, "FIPS 180-4"),
@@ -190,7 +190,7 @@ TEMPLATES = [
 
     # --- Threat-model / scope honesty ---
     ("Threat Model", "Destination IP visible on wire (documented, no false privacy claim)", CWE, "CWE-319"),
-    ("Threat Model", "WFP DNS block is a stub (documented)", CWE, "CWE-1188"),
+    ("Threat Model", "WFP DNS block uses real user-mode FFI; Windows/BFE runtime is [UNVERIFIED], trusted_dns redirect still needs a signed callout", CWE, "CWE-1188"),
     ("Threat Model", "ECH is GREASE only (documented)", CWE, "CWE-319"),
     ("Threat Model", "No kernel-mode code beyond signed WinDivert driver", NIST, "800-53 AC-6"),
     ("Threat Model", "No VPN/tunnel mode (scope enforced)", CWE, "CWE-923"),

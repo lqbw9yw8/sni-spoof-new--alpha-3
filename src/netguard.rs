@@ -1,4 +1,4 @@
-//! netguard — destination / hostname allow-deny guards (SSRF surface). [DONE]
+//! netguard — destination / hostname allow-deny guards (SSRF surface). [UNTESTED]
 //!
 //! The relay connects to a single operator-configured destination and the
 //! DoH client fetches from an operator-configured URL. Both are user input
@@ -17,8 +17,8 @@
 //!   `*.internal` are refused (mDNS / cloud-metadata / loopback names).
 //! * the DoH URL must be `https`, carry no userinfo, and parse cleanly.
 //!
-//! This module is pure logic (no network) so every branch is unit tested on
-//! every OS, including the non-Windows CI target.
+//! This module is pure logic (no network) and has branch-level unit tests;
+//! the current checkout's Rust tests are not executed in this environment.
 
 use crate::error::DpiGuardError;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -71,6 +71,48 @@ fn is_ipv6_link_local(v6: &Ipv6Addr) -> bool {
     (segs[0] & 0xffc0) == 0xfe80
 }
 
+/// Parse the legacy IPv4 spellings accepted by several URL/socket stacks.
+///
+/// Rust's `IpAddr::from_str` intentionally accepts only dotted-decimal IPv4,
+/// while Windows `getaddrinfo` and URL parsers have historically accepted
+/// forms such as `2130706433`, `0x7f000001`, and `0177.0.0.1`. If we validate
+/// only with `IpAddr`, those spellings can resolve to 127.0.0.1 or another
+/// forbidden address after the hostname check. Treat them as literals here.
+fn parse_legacy_ipv4(host: &str) -> Option<Ipv4Addr> {
+    let parse_part = |part: &str| {
+        let (digits, radix) = if let Some(rest) = part.strip_prefix("0x") {
+            (rest, 16)
+        } else if part.len() > 1 && part.starts_with('0') {
+            (part, 8)
+        } else {
+            (part, 10)
+        };
+        if digits.is_empty() {
+            return None;
+        }
+        u32::from_str_radix(digits, radix).ok()
+    };
+
+    if host.contains('.') {
+        let parts: Vec<&str> = host.split('.').collect();
+        if parts.len() != 4 {
+            return None;
+        }
+        let octets: Option<Vec<u8>> = parts
+            .iter()
+            .map(|part| parse_part(part).filter(|&v| v <= u32::from(u8::MAX)).map(|v| v as u8))
+            .collect();
+        return octets.map(|v| Ipv4Addr::new(v[0], v[1], v[2], v[3]));
+    }
+
+    // A single numeric/hex component is the historical 32-bit form. Do not
+    // reinterpret ordinary hostnames such as `123.example`.
+    if host.chars().all(|c| c.is_ascii_digit()) || host.starts_with("0x") {
+        return parse_part(host).map(Ipv4Addr::from);
+    }
+    None
+}
+
 /// True when `host` is a name the relay must not resolve/connect to.
 /// Comparison is ASCII-case-insensitive and tolerates a trailing dot.
 ///
@@ -87,6 +129,11 @@ pub fn is_forbidden_hostname(host: &str) -> bool {
     // rule (so 127.0.0.1 is caught even though it is not a DNS name).
     if let Ok(ip) = h.parse::<IpAddr>() {
         return is_forbidden_dest(ip);
+    }
+    // Also catch legacy decimal/hex/octal IPv4 spellings before a resolver
+    // gets a chance to reinterpret them as a hostname (SSRF hardening).
+    if let Some(ip) = parse_legacy_ipv4(&h) {
+        return is_forbidden_dest(IpAddr::V4(ip));
     }
     if h == "localhost" || h.ends_with(".localhost") {
         return true;
@@ -126,24 +173,54 @@ pub fn validate_doh_url(url: &str) -> Result<String, DpiGuardError> {
     // (and before any '?'), since a DoH endpoint never needs credentials.
     let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let authority = &rest[..authority_end];
-    if authority.contains('@') {
+    if authority.is_empty()
+        || authority.contains('@')
+        || authority.chars().any(|c| c.is_ascii_control() || c.is_ascii_whitespace())
+    {
         return Err(DpiGuardError::Config(
-            "doh_server must not contain userinfo (user:password@)".into(),
+            "doh_server has empty/userinfo/whitespace authority".into(),
         ));
     }
-    // Split host from port. Accept [v6]:port as well as host:port.
+    let validate_port = |port: &str| {
+        port.parse::<u16>()
+            .ok()
+            .filter(|&p| p != 0)
+            .ok_or_else(|| DpiGuardError::Config("doh_server has an invalid port".into()))
+    };
+    // Split host from port. Accept [v6]:port as well as host:port. Reject
+    // malformed suffixes instead of treating `host:garbage` as a hostname.
     let host = if let Some(open) = authority.strip_prefix('[') {
-        // bracketed IPv6
         let close = open
             .find(']')
             .ok_or_else(|| DpiGuardError::Config("doh_server has malformed [IPv6] host".into()))?;
+        let suffix = &open[close + 1..];
+        if !suffix.is_empty() {
+            let port = suffix
+                .strip_prefix(':')
+                .ok_or_else(|| DpiGuardError::Config("doh_server has malformed [IPv6]:port".into()))?;
+            validate_port(port)?;
+        }
         &open[..close]
     } else {
-        // host or host:port — a raw IPv6 without brackets would contain
-        // multiple colons; reject that as ambiguous.
-        match authority.rsplit_once(':') {
-            Some((h, port)) if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) => h,
-            _ => authority,
+        // A raw IPv6 without brackets would contain multiple colons; reject
+        // that as ambiguous rather than handing it to a second parser.
+        match authority.matches(':').count() {
+            0 => authority,
+            1 => {
+                let Some((h, port)) = authority.split_once(':') else {
+                    return Err(DpiGuardError::Config("doh_server has malformed authority".into()));
+                };
+                if h.is_empty() {
+                    return Err(DpiGuardError::Config("doh_server has an empty host".into()));
+                }
+                validate_port(port)?;
+                h
+            }
+            _ => {
+                return Err(DpiGuardError::Config(
+                    "doh_server IPv6 literals must use brackets".into(),
+                ));
+            }
         }
     };
     if host.is_empty() {
@@ -227,6 +304,24 @@ mod tests {
     }
 
     #[test]
+    fn legacy_ipv4_spellings_cannot_smuggle_loopback() {
+        assert_eq!(parse_legacy_ipv4("2130706433"), Some(Ipv4Addr::LOCALHOST));
+        assert_eq!(parse_legacy_ipv4("0x7f000001"), Some(Ipv4Addr::LOCALHOST));
+        assert_eq!(parse_legacy_ipv4("0177.0.0.1"), Some(Ipv4Addr::LOCALHOST));
+        assert!(is_forbidden_hostname("2130706433"));
+        assert!(is_forbidden_hostname("0x7f000001"));
+        assert!(is_forbidden_hostname("0177.0.0.1"));
+        assert!(validate_doh_url("https://2130706433/dns-query").is_err());
+        assert!(validate_doh_url("https://0x7f000001/dns-query").is_err());
+    }
+
+    #[test]
+    fn legacy_public_ipv4_is_not_mistaken_for_forbidden() {
+        assert_eq!(parse_legacy_ipv4("16843009"), Some(Ipv4Addr::new(1, 1, 1, 1)));
+        assert!(!is_forbidden_hostname("16843009"));
+    }
+
+    #[test]
     fn forbidden_hostnames() {
         assert!(is_forbidden_hostname("localhost"));
         assert!(is_forbidden_hostname("LocalHost."));
@@ -272,6 +367,16 @@ mod tests {
             "https://cloudflare-dns.com/dns-query"
         );
         assert!(validate_doh_url("https://[2606:4700:4700::1111]/dns-query").is_ok());
+    }
+
+    #[test]
+    fn doh_url_rejects_malformed_or_out_of_range_ports() {
+        assert!(validate_doh_url("https://example.com:0/dns-query").is_err());
+        assert!(validate_doh_url("https://example.com:65536/dns-query").is_err());
+        assert!(validate_doh_url("https://example.com:abc/dns-query").is_err());
+        assert!(validate_doh_url("https://[2606:4700:4700::1111]:443/dns-query").is_ok());
+        assert!(validate_doh_url("https://[2606:4700:4700::1111]garbage/dns-query").is_err());
+        assert!(validate_doh_url("https://2606:4700:4700::1111/dns-query").is_err());
     }
 
     #[test]

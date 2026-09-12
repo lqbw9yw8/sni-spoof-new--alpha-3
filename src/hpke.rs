@@ -1,4 +1,4 @@
-//! hpke — pure-Rust HPKE base-mode primitives for real ECH sealing. [DONE]
+//! hpke — pure-Rust HPKE base-mode primitives for real ECH sealing. [UNTESTED]
 //!
 //! Implements exactly the slice of RFC 9180 that ECH (draft-ietf-tls-esni,
 //! extension `0xFE0D`) needs:

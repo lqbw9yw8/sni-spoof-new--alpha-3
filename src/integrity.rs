@@ -1,5 +1,5 @@
 //! integrity — SHA-256 pinning helpers used by the WinDivert driver
-//! loader. [DONE] cfg-free so Linux CI can test the compare logic.
+//! loader. [UNTESTED] cfg-free so Linux CI can test the compare logic; current Rust tests were not executed.
 //!
 //! Hash comparison is constant-time in the pin *values* (every pin is
 //! always scanned) so a local attacker cannot use a timing oracle to
@@ -45,18 +45,39 @@ pub fn hash_is_pinned(hash_hex: &str, pins: &[String]) -> bool {
     ok
 }
 
-pub fn sha256_hex_file(path: &Path, max_bytes: u64) -> Result<String, DpiGuardError> {
-    let mut file = std::fs::File::open(path)?;
+/// Hash an already-open file handle. The caller can keep the same handle
+/// open after this function returns, closing the hash/replace TOCTOU window
+/// that exists when a path is hashed and opened later.
+pub fn sha256_hex_file_handle(
+    file: &mut std::fs::File,
+    display_path: &Path,
+    max_bytes: u64,
+) -> Result<String, DpiGuardError> {
     let len = file.metadata()?.len();
     if len > max_bytes {
         return Err(DpiGuardError::Driver(format!(
             "{} is {len} bytes, over the {max_bytes} byte driver-size cap (refusing to hash; possible planted file)",
-            path.display()
+            display_path.display()
         )));
     }
-    let mut buf = Vec::with_capacity(len as usize);
-    file.read_to_end(&mut buf)?;
+    // Metadata is not a stable size guarantee: a concurrent append can grow
+    // the file after the check above. Read one byte beyond the cap so the
+    // hash path remains bounded and fails closed.
+    let read_cap = max_bytes.saturating_add(1);
+    let mut buf = Vec::with_capacity(len.min(max_bytes) as usize);
+    (&mut *file).take(read_cap).read_to_end(&mut buf)?;
+    if buf.len() as u64 > max_bytes {
+        return Err(DpiGuardError::Driver(format!(
+            "{} changed while hashing and exceeded the {max_bytes} byte driver-size cap",
+            display_path.display()
+        )));
+    }
     Ok(sha256_hex(&buf))
+}
+
+pub fn sha256_hex_file(path: &Path, max_bytes: u64) -> Result<String, DpiGuardError> {
+    let mut file = std::fs::File::open(path)?;
+    sha256_hex_file_handle(&mut file, path, max_bytes)
 }
 
 #[cfg(test)]

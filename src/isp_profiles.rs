@@ -1,4 +1,4 @@
-//! isp_profiles — ISP-specific DPI bypass profiles. [DONE]
+//! isp_profiles — ISP-specific DPI bypass profiles. [UNTESTED]
 //!
 //! Different ISPs use different DPI systems (TSPU, Sandvine, Fortinet,
 //! custom). Each profile bundles recommended settings for that ISP.

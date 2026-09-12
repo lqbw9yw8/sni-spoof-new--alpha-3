@@ -1,4 +1,4 @@
-//! pipeline — OS-independent packet processor. [DONE]
+//! pipeline — OS-independent packet processor. [PARTIAL]
 //! This is what `main` actually runs on every diverted packet: parse L3/L4
 //! (skipping the TCP header via data-offset), splice a mutated SNI with
 //! rewritten TLS lengths, optional TCP segmentation, optional TTL-limited
@@ -320,7 +320,7 @@ impl Pipeline {
                             "QUIC reverse NAT: restored dst port {} -> {} for server {}",
                             parsed.dst_port,
                             orig_sport,
-                            parsed.src
+                            crate::stealth::redact_endpoint(&parsed.src.to_string())
                         );
                         return Ok(WireAction::Send(vec![rewritten]));
                     }
@@ -371,7 +371,7 @@ impl Pipeline {
                                     "QUIC bypass: rewrote src {} -> {} for dst {} (blindspot)",
                                     parsed.src_port,
                                     new_sport,
-                                    parsed.dst
+                                    crate::stealth::redact_endpoint(&parsed.dst.to_string())
                                 );
                                 return Ok(WireAction::Send(vec![rewritten]));
                             }
@@ -516,6 +516,7 @@ impl Pipeline {
         match action {
             HsAction::Pass => Ok(Some(WireAction::Send(vec![raw.to_vec()]))),
             HsAction::InjectFake => {
+                crate::observability::injection_attempt();
                 let mode = self.relay_mode.clone().unwrap_or(RelayMode {
                     fake_sni: String::new(),
                     connect_port: 0,
@@ -556,6 +557,7 @@ impl Pipeline {
                         log::error!("relay fake ClientHello build failed: {e}");
                         entry.monitor.fail();
                         entry.gate.fail();
+                        crate::observability::injection_failure();
                         entry.done = true;
                         return Ok(Some(WireAction::Send(vec![raw.to_vec()])));
                     }
@@ -612,6 +614,7 @@ impl Pipeline {
             HsAction::Complete => {
                 entry.done = true;
                 entry.gate.succeed();
+                crate::observability::injection_success();
                 log::info!("relay fake-SNI handshake complete; real data may flow");
                 Ok(Some(WireAction::Send(vec![raw.to_vec()])))
             }
@@ -621,6 +624,7 @@ impl Pipeline {
                 // the real ClientHello is never copied.
                 entry.done = true;
                 entry.gate.fail();
+                crate::observability::injection_failure();
                 log::warn!("relay handshake monitor failed; gate set to failure");
                 Ok(Some(WireAction::Send(vec![raw.to_vec()])))
             }
@@ -1344,7 +1348,11 @@ impl Pipeline {
             None
         };
         if let Some(m) = adaptive {
-            log::debug!("adaptive desync for {domain:?}: {}", m.as_str());
+            log::debug!(
+                "adaptive desync for {}: {}",
+                hash_sensitive(domain, run_salt()),
+                m.as_str()
+            );
         }
         let use_tls_record_frag = self.settings.enable_tls_record_fragmentation
             || self.settings.enable_frag_mid_sni
@@ -1543,11 +1551,11 @@ impl Pipeline {
             self.last_desync
                 .insert((parsed.dst, parsed.src_port), m.as_str().to_string());
         }
-        // rotate_ips is deliberately NOT applied here. Rewriting the
-        // destination IP of a live TCP flow would break the connection (the
-        // peer answers from the original address), so the previous
-        // `let _ = rotate_ip(...)` was a no-op that only looked like a
-        // feature. main.rs logs the setting as unimplemented (F-003).
+        // Destination-IP rotation belongs to relay connection selection
+        // (`relay::RelayTarget`), not this transparent packet path. Rewriting
+        // a live TCP flow's destination would make the peer answer from the
+        // original address and corrupt the 4-tuple. Relay mode consumes the
+        // validated `Settings::rotate_ips` list before the handshake starts.
         //
         // Session-ticket cache: record that we emitted a ClientHello for
         // this domain so the LRU structure actually exercises put/get

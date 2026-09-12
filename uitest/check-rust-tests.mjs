@@ -165,7 +165,7 @@ ok("empty web_ui_token still means leave-as-is", /k == "web_ui_token"/.test(CONF
 ok("empty win_divert_sha256 still means leave-as-is", /k == "win_divert_sha256"/.test(CONFIG));
 ok("new config tests added",
   ["default_settings_round_trip_through_toml",
-   "trusted_dns_can_be_set_and_cleared_from_the_ui",
+   "trusted_dns_redirect_is_rejected_and_can_be_cleared",
    "merge_partial_preserves_every_untouched_field"].every((t) => CONFIG.includes("fn " + t + "(")));
 
 console.log("\n[H] brace balance — calibrated so it can actually fail");

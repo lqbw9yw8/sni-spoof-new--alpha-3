@@ -1,4 +1,4 @@
-//! packet — IPv4/IPv6 + TCP/UDP view and RFC 1071 checksums. [DONE]
+//! packet — IPv4/IPv6 + TCP/UDP view and RFC 1071 checksums. [UNTESTED]
 //!
 //! Thin, allocation-light helpers over on-wire buffers. Every reader
 //! validates lengths before indexing so a truncated packet cannot panic
@@ -28,58 +28,62 @@ pub fn checksum_rfc1071(data: &[u8]) -> u16 {
     !(sum as u16)
 }
 
-pub fn tcp_checksum_v4(src: [u8; 4], dst: [u8; 4], tcp_segment: &[u8]) -> u16 {
+pub fn tcp_checksum_v4(src: [u8; 4], dst: [u8; 4], tcp_segment: &[u8]) -> Option<u16> {
+    let len = u16::try_from(tcp_segment.len()).ok()?;
     let mut buf = Vec::with_capacity(12 + tcp_segment.len() + 1);
     buf.extend_from_slice(&src);
     buf.extend_from_slice(&dst);
     buf.push(0);
     buf.push(PROTO_TCP);
-    buf.extend_from_slice(&(tcp_segment.len() as u16).to_be_bytes());
+    buf.extend_from_slice(&len.to_be_bytes());
     buf.extend_from_slice(tcp_segment);
     if tcp_segment.len() % 2 == 1 {
         buf.push(0);
     }
-    checksum_rfc1071(&buf)
+    Some(checksum_rfc1071(&buf))
 }
 
-pub fn tcp_checksum_v6(src: [u8; 16], dst: [u8; 16], tcp_segment: &[u8]) -> u16 {
+pub fn tcp_checksum_v6(src: [u8; 16], dst: [u8; 16], tcp_segment: &[u8]) -> Option<u16> {
+    let len = u32::try_from(tcp_segment.len()).ok()?;
     let mut buf = Vec::with_capacity(40 + tcp_segment.len() + 1);
     buf.extend_from_slice(&src);
     buf.extend_from_slice(&dst);
-    buf.extend_from_slice(&(tcp_segment.len() as u32).to_be_bytes());
+    buf.extend_from_slice(&len.to_be_bytes());
     buf.extend_from_slice(&[0, 0, 0, PROTO_TCP]);
     buf.extend_from_slice(tcp_segment);
     if tcp_segment.len() % 2 == 1 {
         buf.push(0);
     }
-    checksum_rfc1071(&buf)
+    Some(checksum_rfc1071(&buf))
 }
 
-pub fn udp_checksum_v4(src: [u8; 4], dst: [u8; 4], udp_segment: &[u8]) -> u16 {
+pub fn udp_checksum_v4(src: [u8; 4], dst: [u8; 4], udp_segment: &[u8]) -> Option<u16> {
+    let len = u16::try_from(udp_segment.len()).ok()?;
     let mut buf = Vec::with_capacity(12 + udp_segment.len() + 1);
     buf.extend_from_slice(&src);
     buf.extend_from_slice(&dst);
     buf.push(0);
     buf.push(PROTO_UDP);
-    buf.extend_from_slice(&(udp_segment.len() as u16).to_be_bytes());
+    buf.extend_from_slice(&len.to_be_bytes());
     buf.extend_from_slice(udp_segment);
     if udp_segment.len() % 2 == 1 {
         buf.push(0);
     }
-    udp_checksum_nonzero(checksum_rfc1071(&buf))
+    Some(udp_checksum_nonzero(checksum_rfc1071(&buf)))
 }
 
-pub fn udp_checksum_v6(src: [u8; 16], dst: [u8; 16], udp_segment: &[u8]) -> u16 {
+pub fn udp_checksum_v6(src: [u8; 16], dst: [u8; 16], udp_segment: &[u8]) -> Option<u16> {
+    let len = u32::try_from(udp_segment.len()).ok()?;
     let mut buf = Vec::with_capacity(40 + udp_segment.len() + 1);
     buf.extend_from_slice(&src);
     buf.extend_from_slice(&dst);
-    buf.extend_from_slice(&(udp_segment.len() as u32).to_be_bytes());
+    buf.extend_from_slice(&len.to_be_bytes());
     buf.extend_from_slice(&[0, 0, 0, PROTO_UDP]);
     buf.extend_from_slice(udp_segment);
     if udp_segment.len() % 2 == 1 {
         buf.push(0);
     }
-    udp_checksum_nonzero(checksum_rfc1071(&buf))
+    Some(udp_checksum_nonzero(checksum_rfc1071(&buf)))
 }
 
 /// RFC 768: a computed UDP checksum of 0 is transmitted as 0xFFFF.
@@ -93,8 +97,8 @@ fn udp_checksum_nonzero(cksum: u16) -> u16 {
 
 /// Bound `buf` to the IPv4 Total Length / IPv6 Payload Length so ethernet
 /// padding or a oversized WinDivert buffer cannot leak into TLS parse or
-/// TCP checksums. Truncated packets (header length > buffer) keep the
-/// bytes we have so the caller can still fail-open.
+/// TCP checksums. A declared length larger than the captured buffer is
+/// rejected so the caller can fail-open with the untouched original.
 pub fn l3_slice(buf: &[u8]) -> Option<&[u8]> {
     if buf.is_empty() {
         return None;
@@ -105,17 +109,24 @@ pub fn l3_slice(buf: &[u8]) -> Option<&[u8]> {
                 return None;
             }
             let total = u16::from_be_bytes([buf[2], buf[3]]) as usize;
-            if total < 20 {
+            if total < 20 || total > buf.len() {
+                // A declared length larger than the captured buffer is a
+                // truncated packet. Do not parse the bytes we have as a
+                // complete TCP/UDP packet; the caller will fail-open the
+                // untouched original instead.
                 return None;
             }
-            Some(&buf[..total.min(buf.len())])
+            Some(&buf[..total])
         }
         6 => {
             if buf.len() < 40 {
                 return None;
             }
             let total = 40usize.saturating_add(u16::from_be_bytes([buf[4], buf[5]]) as usize);
-            Some(&buf[..total.min(buf.len())])
+            if total > buf.len() {
+                return None;
+            }
+            Some(&buf[..total])
         }
         _ => None,
     }
@@ -288,6 +299,8 @@ pub struct ParsedPacket {
     pub l4_offset: usize,
     pub l4_header_len: usize,
     pub payload_offset: usize,
+    /// End of the declared IPv4/IPv6 packet, excluding capture padding.
+    packet_end: usize,
     pub src_port: u16,
     pub dst_port: u16,
     pub tcp_flags: Option<u8>,
@@ -298,10 +311,11 @@ pub struct ParsedPacket {
 
 impl ParsedPacket {
     pub fn payload<'a>(&self, buf: &'a [u8]) -> &'a [u8] {
-        if buf.len() <= self.payload_offset {
+        let end = buf.len().min(self.packet_end);
+        if end <= self.payload_offset {
             &[]
         } else {
-            &buf[self.payload_offset..]
+            &buf[self.payload_offset..end]
         }
     }
 
@@ -319,12 +333,10 @@ impl ParsedPacket {
 }
 
 pub fn parse_l3l4(buf: &[u8]) -> Option<ParsedPacket> {
-    if buf.is_empty() {
-        return None;
-    }
-    match buf[0] >> 4 {
-        4 => parse_ipv4_l4(buf),
-        6 => parse_ipv6_l4(buf),
+    let frame = l3_slice(buf)?;
+    match frame[0] >> 4 {
+        4 => parse_ipv4_l4(frame),
+        6 => parse_ipv6_l4(frame),
         _ => None,
     }
 }
@@ -385,6 +397,7 @@ fn parse_l4(
                 l4_offset,
                 l4_header_len,
                 payload_offset: l4_offset + l4_header_len,
+                packet_end: buf.len(),
                 src_port,
                 dst_port,
                 tcp_flags: Some(tcp[tcp_off::FLAGS]),
@@ -409,6 +422,7 @@ fn parse_l4(
                 l4_offset,
                 l4_header_len: 8,
                 payload_offset: l4_offset + 8,
+                packet_end: buf.len(),
                 src_port,
                 dst_port,
                 tcp_flags: None,
@@ -447,7 +461,9 @@ pub fn recalculate_all_checksums(pkt: &mut [u8]) {
                     let off = ih + tcp_off::CHECKSUM;
                     if pkt.len() >= off + 2 {
                         pkt[off..off + 2].copy_from_slice(&[0, 0]);
-                        let cksum = tcp_checksum_v4(src, dst, &pkt[ih..end]);
+                        let Some(cksum) = tcp_checksum_v4(src, dst, &pkt[ih..end]) else {
+                            return;
+                        };
                         pkt[off..off + 2].copy_from_slice(&cksum.to_be_bytes());
                     }
                 }
@@ -455,7 +471,9 @@ pub fn recalculate_all_checksums(pkt: &mut [u8]) {
                     let off = ih + udp_off::CHECKSUM;
                     if pkt.len() >= off + 2 {
                         pkt[off..off + 2].copy_from_slice(&[0, 0]);
-                        let cksum = udp_checksum_v4(src, dst, &pkt[ih..end]);
+                        let Some(cksum) = udp_checksum_v4(src, dst, &pkt[ih..end]) else {
+                            return;
+                        };
                         pkt[off..off + 2].copy_from_slice(&cksum.to_be_bytes());
                     }
                 }
@@ -475,14 +493,18 @@ pub fn recalculate_all_checksums(pkt: &mut [u8]) {
                 let off = 40 + tcp_off::CHECKSUM;
                 if pkt.len() >= off + 2 {
                     pkt[off..off + 2].copy_from_slice(&[0, 0]);
-                    let cksum = tcp_checksum_v6(src, dst, &pkt[40..end]);
+                    let Some(cksum) = tcp_checksum_v6(src, dst, &pkt[40..end]) else {
+                        return;
+                    };
                     pkt[off..off + 2].copy_from_slice(&cksum.to_be_bytes());
                 }
             } else if proto == PROTO_UDP {
                 let off = 40 + udp_off::CHECKSUM;
                 if pkt.len() >= off + 2 {
                     pkt[off..off + 2].copy_from_slice(&[0, 0]);
-                    let cksum = udp_checksum_v6(src, dst, &pkt[40..end]);
+                    let Some(cksum) = udp_checksum_v6(src, dst, &pkt[40..end]) else {
+                        return;
+                    };
                     pkt[off..off + 2].copy_from_slice(&cksum.to_be_bytes());
                 }
             }
@@ -509,7 +531,19 @@ pub fn rebuild_with_payload(
             have: original.len(),
         });
     }
-    let mut out = Vec::with_capacity(header_end + new_payload.len());
+    let output_len = header_end
+        .checked_add(new_payload.len())
+        .ok_or_else(|| DpiGuardError::OutOfRange("rebuilt packet length overflow".into()))?;
+    let max_wire_len = match parsed.l3 {
+        L3::Ipv4 => usize::from(u16::MAX),
+        L3::Ipv6 => 40 + usize::from(u16::MAX),
+    };
+    if output_len > max_wire_len {
+        return Err(DpiGuardError::OutOfRange(
+            "rebuilt IPv4/IPv6 packet exceeds its 65535-byte length-field limit".into(),
+        ));
+    }
+    let mut out = Vec::with_capacity(output_len);
     out.extend_from_slice(&original[..header_end]);
     out.extend_from_slice(new_payload);
     if let Some(seq) = seq_override {
@@ -700,6 +734,14 @@ mod tests {
     }
 
     #[test]
+    fn checksum_length_overflow_is_rejected_not_truncated() {
+        let oversized = vec![0u8; usize::from(u16::MAX) + 1];
+        assert!(tcp_checksum_v4([0; 4], [0; 4], &oversized).is_none());
+        assert!(udp_checksum_v4([0; 4], [0; 4], &oversized).is_none());
+        assert!(tcp_checksum_v6([0; 16], [0; 16], &oversized).is_some());
+    }
+
+    #[test]
     fn ipv4_parse_rejects_bad_ihl_and_short_buffers() {
         assert!(Ipv4View::parse(&[]).is_none());
         assert!(Ipv4View::parse(&[0x45, 0, 0]).is_none());
@@ -708,6 +750,15 @@ mod tests {
         assert!(Ipv4View::parse(&too_big_ihl).is_none());
         recalc_ipv4_checksum(&mut []);
         recalc_ipv4_checksum(&mut [0x45]);
+    }
+
+    #[test]
+    fn declared_l3_length_larger_than_capture_fails_closed_to_parser() {
+        let mut pkt = wrap_ipv4_tcp(b"hello", [1, 1, 1, 1], [2, 2, 2, 2], 1234, 443, 1, TCP_FLAG_ACK);
+        let declared = (pkt.len() + 20) as u16;
+        pkt[2..4].copy_from_slice(&declared.to_be_bytes());
+        assert!(l3_slice(&pkt).is_none());
+        assert!(parse_l3l4(&pkt).is_none());
     }
 
     #[test]

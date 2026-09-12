@@ -1,11 +1,10 @@
-//! mobile_gateway — detect and share connection with LAN devices. [DONE]
+//! mobile_gateway — LAN device discovery for a future gateway. [PARTIAL]
 //!
-//! When enabled, dpi_guard acts as a gateway for other devices on the
-//! local network. It detects connected devices via ARP and configures
-//! the system to forward their traffic through the active relay.
-//!
-//! This is a lighter alternative to TUN mode — no virtual interface
-//! needed, just system proxy/forwarding rules.
+//! When enabled, dpi_guard reports the local interface and devices visible
+//! in the ARP/neighbour table. It deliberately does **not** open a LAN
+//! listener, enable IP forwarding, or install NAT/proxy rules: doing so
+//! safely requires an explicit administrator-reviewed gateway policy and
+//! platform-specific rollback. The relay remains loopback-only.
 
 use std::net::IpAddr;
 use std::process::Command;

@@ -63,7 +63,7 @@ export const DEFAULTS = {
   relay_resolve_doh: true,
   relay_mutate_real_sni: false,
   relay_emit_decoy: false,
-  doh_server: "https://1.1.1.1/dns-query",
+  doh_server: "https://cloudflare-dns.com/dns-query",
   sni_only: [],
   sni_except: [],
   enable_tls_record_fragmentation: true,
@@ -119,6 +119,7 @@ const BROWSERS = ["chrome", "firefox", "safari", "edge", "random"];
 
 let settings = JSON.parse(JSON.stringify(DEFAULTS));
 let processed = 128741;
+let statusOverrides = {};
 
 const isIP = (s) => {
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(s)) return s.split(".").every((p) => +p <= 255);
@@ -154,6 +155,8 @@ export function validate(raw) {
   if (s.trusted_dns !== undefined && s.trusted_dns !== null && !isIP(s.trusted_dns))
     return "trusted_dns must be valid IP";
   for (const ip of s.rotate_ips) if (!isIP(ip)) return `rotate_ips ${ip} invalid`;
+  if (s.win_divert_sha256.length !== 0 && s.win_divert_sha256.length !== 2)
+    return "win_divert_sha256 must contain exactly two pins in DLL, SYS order";
   for (const h of s.win_divert_sha256) if (!/^[0-9a-fA-F]{64}$/.test(h.trim()))
     return "win_divert_sha256 must be 64 hex";
   if (s.web_ui_port === 0) return "web_ui_port must be >0";
@@ -299,6 +302,7 @@ function statusJson() {
     driver_handles_live: true,
     driver_handles_retired: 2,
     uptime_secs: 3725,
+    ...statusOverrides,
   };
 }
 
@@ -395,6 +399,10 @@ export function createServer() {
 export function resetForTests() {
   settings = JSON.parse(JSON.stringify(DEFAULTS));
   processed = 0;
+  statusOverrides = {};
+}
+export function setStatusForTests(overrides) {
+  statusOverrides = { ...overrides };
 }
 export function getSettings() { return settings; }
 

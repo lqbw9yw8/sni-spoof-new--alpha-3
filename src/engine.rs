@@ -3,14 +3,18 @@
 //! Written against the published 0.5.5 API (`network`, `recv(Some(&mut buf))`,
 //! `send`, `shutdown`, `close`). Still needs a Windows host with the
 //! driver to field-test. Pure logic (checksums, fail-open, TLS parse) is
-//! delegated to cfg-free modules and is unit-tested on every OS.
+//! delegated to cfg-free modules that have unit tests; the current checkout
+//! has not executed the Rust test suite.
 #![allow(unsafe_code)]
 
 use crate::error::DpiGuardError;
 use crate::fail_open::{handle_exception_fail_open, WireAction};
 use crate::sequence::race_condition_fix_delay;
 use std::borrow::Cow;
+use std::ffi::{c_void, OsString};
 use std::net::IpAddr;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -142,8 +146,15 @@ pub fn reinject_held_packets(packets: &[Vec<u8>]) -> Result<(), DpiGuardError> {
         match found {
             Some(h) => send_packet(ptr, &h.packet),
             None => {
-                // Desync: still fail-open rather than drop.
-                inject_packet(want)?;
+                // The pipeline may already have released this flow while the
+                // watchdog was taking its snapshot. There is no safe
+                // WinDivert address to attach to `want` in that case: the
+                // 0.5.5 API explicitly requires the captured address before
+                // `send`, so never fall back to an unsafe zero-address
+                // packet. The capture loop has already sent the current
+                // packet for this flow, or the packet was removed during
+                // shutdown; log and continue without duplicating it.
+                log::debug!("held packet no longer present; no captured address to reinject");
             }
         }
     }
@@ -357,6 +368,7 @@ where
                 if !running.load(Ordering::SeqCst) {
                     break;
                 }
+                crate::observability::capture_error();
                 consecutive_errors = consecutive_errors.saturating_add(1);
                 // Log the first failure and then every 100th. A link that
                 // drops and returns once a second would otherwise write a
@@ -379,6 +391,7 @@ where
         let action = handle_exception_fail_open(&original, &mut on_packet);
         match action {
             WireAction::Hold => {
+                crate::observability::packet_held();
                 let held = WinDivertPacket::<'static, NetworkLayer> {
                     address: address.clone(),
                     data: Cow::Owned(original.clone()),
@@ -433,19 +446,16 @@ pub fn recalculate_checksums(pkt: &mut Vec<u8>) {
     crate::packet::recalculate_all_checksums(pkt);
 }
 
-/// Inject via a **send-only** handle whose filter matches nothing, so it
-/// never competes with the capture handle for diverted packets.
-pub fn inject_packet(packet: &[u8]) -> Result<(), DpiGuardError> {
-    let flags = WinDivertFlags::new().set_send_only();
-    let handle = WinDivert::network("false", 0, flags)
-        .map_err(|e| DpiGuardError::Driver(format!("send-only open failed: {e}")))?;
-    // SAFETY: address is zeroed; WinDivert infers direction from headers
-    // when possible. Prefer capture_loop's path which copies the real address.
-    let pkt = unsafe { WinDivertPacket::<'static, NetworkLayer>::new(packet.to_vec()) };
-    handle
-        .send(&pkt)
-        .map_err(|e| DpiGuardError::Driver(format!("send failed: {e}")))?;
-    Ok(())
+/// Reject address-less injection instead of constructing a zeroed
+/// `WinDivertPacket`. In windivert 0.5.5, `WinDivertPacket::new` is unsafe
+/// specifically because its address is zeroed and **must be filled with the
+/// correct captured interface/direction before `send`**. The live capture
+/// path always sends a packet carrying the address returned by `recv`; this
+/// compatibility entry point has no address and therefore cannot be safe.
+pub fn inject_packet(_packet: &[u8]) -> Result<(), DpiGuardError> {
+    Err(DpiGuardError::Driver(
+        "address-less injection refused: use the captured WinDivert address".into(),
+    ))
 }
 
 pub fn thread_safe_logging_init() {
@@ -458,14 +468,129 @@ pub fn graceful_shutdown(running: Arc<AtomicBool>) -> Result<(), DpiGuardError> 
     Ok(())
 }
 
-/// Confirm the WinDivert binaries sit next to the **executable** (never
-/// cwd — that is a DLL-planting vector) AND — when the operator pinned
-/// expected SHA-256 digests in config — that every loaded driver binary
-/// matches a pinned digest. Presence-only trust is still allowed for
-/// unpinned deployments, but it is logged loudly because a dropped-in
-/// `WinDivert.dll`/`WinDivert64.sys` runs with kernel/admin privileges
-/// (classic driver supply-chain attack).
-pub fn version_check(expected_hashes: &[String]) -> Result<(), DpiGuardError> {
+/// Files held by the backend for its entire lifetime. Hashing a path and
+/// then loading it later leaves a replacement window; these read handles are
+/// opened with delete/write sharing disabled before the hash is computed.
+/// The DLL module reference is also retained so the verified module cannot be
+/// unloaded and replaced while WinDivert is using it.
+pub struct DriverPin {
+    _dll_file: std::fs::File,
+    _sys_file: std::fs::File,
+    module: *mut c_void,
+}
+
+impl Drop for DriverPin {
+    fn drop(&mut self) {
+        // SAFETY: `module` is a live reference returned by LoadLibraryExW and
+        // is released exactly once, after the capture handle has shut down.
+        unsafe {
+            FreeLibrary(self.module);
+        }
+    }
+}
+
+const FILE_SHARE_READ: u32 = 0x0000_0001;
+const LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR: u32 = 0x0000_0100;
+const LOAD_LIBRARY_SEARCH_DEFAULT_DIRS: u32 = 0x0000_1000;
+
+extern "system" {
+    fn FreeLibrary(module: *mut c_void) -> i32;
+    fn GetModuleFileNameW(module: *mut c_void, filename: *mut u16, size: u32) -> u32;
+    fn LoadLibraryExW(
+        filename: *const u16,
+        file: *mut c_void,
+        flags: u32,
+    ) -> *mut c_void;
+}
+
+fn nul_terminated_wide(path: &Path) -> Vec<u16> {
+    path.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
+
+fn comparable_path(path: &Path) -> String {
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let text = canonical.to_string_lossy().replace('/', "\\");
+    text.strip_prefix("\\\\?\\")
+        .unwrap_or(&text)
+        .to_ascii_lowercase()
+}
+
+/// Return the path of the module Windows actually loaded. Checking only the
+/// file next to the executable is insufficient when the loader resolved a
+/// same-named DLL from another directory.
+fn loaded_module_path(module: *mut c_void) -> Result<PathBuf, DpiGuardError> {
+    let mut buf = vec![0u16; 32_768];
+    let len = unsafe { GetModuleFileNameW(module, buf.as_mut_ptr(), buf.len() as u32) };
+    if len == 0 || len as usize >= buf.len() {
+        return Err(DpiGuardError::Driver(format!(
+            "cannot determine the loaded WinDivert.dll path: {}",
+            std::io::Error::last_os_error()
+        )));
+    }
+    Ok(PathBuf::from(OsString::from_wide(&buf[..len as usize])))
+}
+
+fn load_verified_dll(path: &Path) -> Result<*mut c_void, DpiGuardError> {
+    let wide = nul_terminated_wide(path);
+    // The absolute path plus DLL-load-directory flags prevents the normal
+    // current-directory/PATH search from selecting a planted DLL. Holding
+    // the returned module reference keeps this exact loaded image alive.
+    let module = unsafe {
+        LoadLibraryExW(
+            wide.as_ptr(),
+            std::ptr::null_mut(),
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
+        )
+    };
+    if module.is_null() {
+        return Err(DpiGuardError::Driver(format!(
+            "LoadLibraryExW could not load the verified WinDivert.dll at {}: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        )));
+    }
+    let loaded = match loaded_module_path(module) {
+        Ok(path) => path,
+        Err(e) => {
+            unsafe {
+                FreeLibrary(module);
+            }
+            return Err(e);
+        }
+    };
+    if comparable_path(&loaded) != comparable_path(path) {
+        unsafe {
+            FreeLibrary(module);
+        }
+        return Err(DpiGuardError::Driver(format!(
+            "WinDivert.dll loader path mismatch: expected {}, loaded {}",
+            path.display(),
+            loaded.display()
+        )));
+    }
+    Ok(module)
+}
+
+fn open_pinned_file(path: &Path) -> Result<std::fs::File, DpiGuardError> {
+    use std::os::windows::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        // Do not grant delete/write sharing. A replacement cannot occur
+        // between hashing this handle and the driver loader using the path.
+        .share_mode(FILE_SHARE_READ)
+        .open(path)
+        .map_err(DpiGuardError::Io)
+}
+
+/// Confirm the WinDivert binaries sit next to the **executable** (never cwd),
+/// hash the exact open handles, load the DLL from that absolute path, and
+/// verify the module path Windows resolved. The returned [`DriverPin`] must
+/// stay alive until capture shutdown; it closes the hash/replace race that a
+/// one-shot `Result<()>` check could not close.
+pub fn version_check(expected_hashes: &[String]) -> Result<DriverPin, DpiGuardError> {
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
@@ -473,46 +598,77 @@ pub fn version_check(expected_hashes: &[String]) -> Result<(), DpiGuardError> {
             DpiGuardError::Driver("cannot determine executable directory for driver search".into())
         })?;
 
-    let dll = ["WinDivert64.dll", "WinDivert.dll"]
-        .iter()
-        .map(|n| exe_dir.join(n))
-        .find(|p| p.exists());
-    let sys = ["WinDivert64.sys", "WinDivert.sys"]
-        .iter()
-        .map(|n| exe_dir.join(n))
-        .find(|p| p.exists());
-
-    let (Some(dll), Some(sys)) = (dll, sys) else {
-        return Err(DpiGuardError::Driver(
-            "WinDivert.dll and WinDivert64.sys not found next to the executable — download the official release, do not commit the driver to git, do not load from cwd".into(),
-        ));
+    // These are the names used by the WinDivert import and by the official
+    // architecture-specific driver package. Do not accept alternate names.
+    let dll = exe_dir.join("WinDivert.dll");
+    let sys_name = if cfg!(target_arch = "x86") {
+        "WinDivert32.sys"
+    } else {
+        "WinDivert64.sys"
     };
+    let sys = exe_dir.join(sys_name);
+
+    if !dll.is_file() || !sys.is_file() {
+        return Err(DpiGuardError::Driver(format!(
+            "WinDivert.dll and {sys_name} not found next to the executable — download the official release, do not commit the driver to git, do not load from cwd"
+        )));
+    }
 
     let pins: Vec<String> = expected_hashes
         .iter()
         .map(|h| h.trim().to_ascii_lowercase())
         .collect();
-
-    if pins.is_empty() {
-        log::warn!(
-            "no WinDivert SHA-256 pin configured (win_divert_sha256) — driver binaries are trusted by presence only. \
-             This is a supply-chain risk; pin the official release digests."
-        );
-        return Ok(());
+    if pins.len() != 2 {
+        return Err(DpiGuardError::Driver(format!(
+            "win_divert_sha256 must contain exactly two SHA-256 pins in order: WinDivert.dll, {sys_name}"
+        )));
+    }
+    if pins
+        .iter()
+        .any(|p| p.len() != 64 || !p.bytes().all(|b| b.is_ascii_hexdigit()))
+    {
+        return Err(DpiGuardError::Driver(
+            "win_divert_sha256 entries must be exactly 64 hexadecimal characters".into(),
+        ));
     }
 
-    for path in [&dll, &sys] {
-        let hash = crate::integrity::sha256_hex_file(path, crate::integrity::MAX_DRIVER_BYTES)?;
-        if !crate::integrity::hash_is_pinned(&hash, &pins) {
-            return Err(DpiGuardError::Driver(format!(
-                "refusing to load {}: SHA-256 {hash} is not in the trusted pin list (possible tampered driver)",
-                path.display()
-            )));
-        }
-        log::info!("verified {} SHA-256 {hash}", path.display());
+    // The two handles are opened before either digest is calculated. This
+    // makes the path, bytes, and retained file identity one atomic check from
+    // the perspective of a local attacker.
+    let mut dll_file = open_pinned_file(&dll)?;
+    let mut sys_file = open_pinned_file(&sys)?;
+    let dll_hash = crate::integrity::sha256_hex_file_handle(
+        &mut dll_file,
+        &dll,
+        crate::integrity::MAX_DRIVER_BYTES,
+    )?;
+    let sys_hash = crate::integrity::sha256_hex_file_handle(
+        &mut sys_file,
+        &sys,
+        crate::integrity::MAX_DRIVER_BYTES,
+    )?;
+    let dll_ok = crate::integrity::constant_time_eq(dll_hash.as_bytes(), pins[0].as_bytes());
+    let sys_ok = crate::integrity::constant_time_eq(sys_hash.as_bytes(), pins[1].as_bytes());
+    if !dll_ok || !sys_ok {
+        let bad = if !dll_ok { &dll } else { &sys };
+        let hash = if !dll_ok { &dll_hash } else { &sys_hash };
+        return Err(DpiGuardError::Driver(format!(
+            "refusing to load {}: SHA-256 {hash} does not match its ordered trusted pin (possible tampered or swapped driver)",
+            bad.display()
+        )));
     }
-    log::info!("WinDivert dll+sys found next to the executable and hash-verified");
-    Ok(())
+    log::info!("verified {} SHA-256", dll.display());
+    log::info!("verified {} SHA-256", sys.display());
+
+    let module = load_verified_dll(&dll)?;
+    log::info!(
+        "WinDivert.dll and {sys_name} are pinned, path-verified, and held for the backend lifetime"
+    );
+    Ok(DriverPin {
+        _dll_file: dll_file,
+        _sys_file: sys_file,
+        module,
+    })
 }
 
 #[cfg(test)]

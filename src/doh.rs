@@ -1,4 +1,4 @@
-//! doh — DNS-over-HTTPS resolution (A records). [DONE]
+//! doh — DNS-over-HTTPS resolution (A records) with checked endpoint resolution. [PARTIAL]
 //!
 //! Resolves a hostname through a DoH endpoint so the query never travels as
 //! plaintext over UDP/53 where an inline DPI or local observer could log it.
@@ -10,14 +10,19 @@
 
 use crate::error::DpiGuardError;
 use rand::Rng;
-use std::io::Read;
-use std::net::{IpAddr, Ipv4Addr};
+use std::io::{self, Read};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::time::Duration;
 
-/// Default DoH endpoint. We use the **IP-literal** `https://1.1.1.1/dns-query`
-/// so the DoH endpoint's own name never needs a (plaintext) bootstrap
-/// lookup. There is deliberately **no** fallback to UDP/53.
-pub const DEFAULT_DOH_URL: &str = "https://1.1.1.1/dns-query";
+/// Default DoH endpoint. The URL uses Cloudflare's certificate-bearing
+/// hostname (not `https://1.1.1.1/...`, which fails ordinary TLS hostname
+/// verification). [`safe_doh_endpoint_resolver`] maps this host to the
+/// operator-reviewed Cloudflare addresses below, so the default still does
+/// not need a plaintext bootstrap lookup. There is deliberately **no**
+/// fallback to UDP/53.
+pub const DEFAULT_DOH_URL: &str = "https://cloudflare-dns.com/dns-query";
+const PINNED_DOH_HOST: &str = "cloudflare-dns.com";
+const PINNED_DOH_IPV4: [Ipv4Addr; 2] = [Ipv4Addr::new(1, 1, 1, 1), Ipv4Addr::new(1, 0, 0, 1)];
 /// Per-attempt timeout. Deliberately shorter than the old 10 s: on a
 /// lossy link a hung request is far more likely than a slow-but-working
 /// one, and the retry budget below gives a larger *total* allowance
@@ -351,11 +356,124 @@ pub fn resolve_a_v4_attempts(
         .unwrap_or_else(|| DpiGuardError::Resolution(format!("DoH resolution failed for {host}"))))
 }
 
+/// Extract the host part from the `host:port` network location passed to
+/// ureq's resolver. ureq supplies bracketed IPv6 locations, but accepting a
+/// location without a port here also makes the helper safe to unit-test.
+fn resolver_host(netloc: &str) -> &str {
+    let netloc = netloc.trim();
+    if let Some(bracketed) = netloc.strip_prefix('[') {
+        return bracketed.split_once(']').map(|(host, _)| host).unwrap_or(netloc);
+    }
+    if netloc.matches(':').count() == 1 {
+        return netloc.split_once(':').map(|(host, _)| host).unwrap_or(netloc);
+    }
+    netloc
+}
+
+fn reject_forbidden_resolver_target(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::PermissionDenied, message.into())
+}
+
+/// Extract the port from ureq's resolver netloc. ureq normally passes
+/// `host:port`; keeping a default here makes the callback deterministic in
+/// unit tests and for future ureq versions that omit the default port.
+fn resolver_port(netloc: &str) -> u16 {
+    let netloc = netloc.trim();
+    if let Some(rest) = netloc.strip_prefix('[') {
+        return rest
+            .split_once(']')
+            .and_then(|(_, suffix)| suffix.strip_prefix(':'))
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(443);
+    }
+    if netloc.matches(':').count() == 1 {
+        return netloc
+            .split_once(':')
+            .and_then(|(_, p)| p.parse().ok())
+            .unwrap_or(443);
+    }
+    443
+}
+
+/// Return the pinned bootstrap addresses for the built-in endpoint. The URL
+/// host remains `cloudflare-dns.com`, so rustls validates the certificate and
+/// sends the correct SNI, while the connection does not depend on a mutable
+/// system-DNS answer. Custom operator endpoints deliberately use the system
+/// resolver below and are still filtered before connect.
+fn pinned_endpoint_addresses(host: &str, port: u16) -> Option<Vec<SocketAddr>> {
+    if host.eq_ignore_ascii_case(PINNED_DOH_HOST) {
+        Some(
+            PINNED_DOH_IPV4
+                .into_iter()
+                .map(|ip| SocketAddr::new(IpAddr::V4(ip), port))
+                .collect(),
+        )
+    } else {
+        None
+    }
+}
+
+/// Filter one system-resolver result set before ureq is allowed to connect.
+/// The returned `SocketAddr`s are the exact addresses ureq will use; it does
+/// not get a chance to perform a second DNS lookup after this check.
+fn filter_doh_endpoint_addresses(
+    addresses: impl IntoIterator<Item = SocketAddr>,
+) -> io::Result<Vec<SocketAddr>> {
+    let safe: Vec<SocketAddr> = addresses
+        .into_iter()
+        .filter(|address| !crate::netguard::is_forbidden_dest(address.ip()))
+        .collect();
+    if safe.is_empty() {
+        return Err(reject_forbidden_resolver_target(
+            "DoH endpoint resolved only to forbidden addresses",
+        ));
+    }
+    Ok(safe)
+}
+
+/// Resolver installed on every DoH `ureq::Agent`. The built-in Cloudflare
+/// endpoint uses the pinned address set above; other hostname endpoints remain
+/// supported, but their system-DNS answers are checked immediately for
+/// loopback, link-local, multicast, unspecified, broadcast, and metadata
+/// destinations. This closes the validation/connect TOCTOU window that the
+/// old `ureq::get` call left open. IP-literal endpoints take the same path,
+/// without any DNS query.
+fn safe_doh_endpoint_resolver(netloc: &str) -> io::Result<Vec<SocketAddr>> {
+    let host = resolver_host(netloc);
+    if host.is_empty() || crate::netguard::is_forbidden_hostname(host) {
+        return Err(reject_forbidden_resolver_target(format!(
+            "DoH endpoint hostname {host:?} is forbidden"
+        )));
+    }
+    let port = resolver_port(netloc);
+    let addresses: Vec<SocketAddr> = match pinned_endpoint_addresses(host, port) {
+        Some(pinned) => pinned,
+        None => {
+            // Resolve exactly once. The resulting SocketAddrs are returned
+            // to ureq and are the addresses it connects to; it must not
+            // receive a hostname and get a second lookup after this policy
+            // check.
+            netloc.to_socket_addrs()?.collect()
+        }
+    };
+    filter_doh_endpoint_addresses(addresses)
+}
+
 /// One DoH round trip: GET the query, bound the body, parse the A records.
 /// Also returns the smallest A-record TTL in seconds so the cache can honor
 /// the authoritative freshness window instead of a fixed constant.
 fn fetch_a_records(url: &str) -> Result<(Vec<IpAddr>, u32), DpiGuardError> {
-    let response = ureq::get(url)
+    // DoH URLs are validated before this function. A dedicated agent is used
+    // per attempt so every connection (including a retry) goes through the
+    // safe resolver; redirects are disabled because a redirect would be an
+    // unreviewed second endpoint.
+    let agent = ureq::AgentBuilder::new()
+        .resolver(safe_doh_endpoint_resolver)
+        .https_only(true)
+        .redirects(0)
+        .build();
+    let response = agent
+        .get(url)
         .timeout(DOH_TIMEOUT)
         // RFC 8484: a DoH client MUST send Accept: application/dns-message.
         .set("Accept", "application/dns-message")
@@ -390,6 +508,37 @@ fn fetch_a_records(url: &str) -> Result<(Vec<IpAddr>, u32), DpiGuardError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn safe_resolver_filters_forbidden_addresses_before_connect() {
+        let addresses = vec![
+            SocketAddr::from(([127, 0, 0, 1], 443)),
+            SocketAddr::from(([169, 254, 169, 254], 443)),
+            SocketAddr::from(([1, 1, 1, 1], 443)),
+        ];
+        let safe = filter_doh_endpoint_addresses(addresses).unwrap();
+        assert_eq!(safe, vec![SocketAddr::from(([1, 1, 1, 1], 443))]);
+    }
+
+    #[test]
+    fn safe_resolver_rejects_forbidden_hostname_without_dns() {
+        assert!(safe_doh_endpoint_resolver("localhost:443").is_err());
+        assert!(safe_doh_endpoint_resolver("127.0.0.1:443").is_err());
+    }
+
+    #[test]
+    fn built_in_endpoint_uses_pinned_addresses_and_tls_hostname() {
+        let addresses = safe_doh_endpoint_resolver("cloudflare-dns.com:443").unwrap();
+        assert_eq!(
+            addresses,
+            vec![
+                SocketAddr::from(([1, 1, 1, 1], 443)),
+                SocketAddr::from(([1, 0, 0, 1], 443)),
+            ]
+        );
+        assert_eq!(resolver_host("cloudflare-dns.com:443"), "cloudflare-dns.com");
+        assert_eq!(resolver_port("cloudflare-dns.com:443"), 443);
+    }
 
     #[test]
     fn b64url_matches_rfc_vectors() {
@@ -528,9 +677,11 @@ mod tests {
     }
 
     #[test]
-    fn default_doh_url_is_ip_literal_cloudflare() {
-        assert_eq!(DEFAULT_DOH_URL, "https://1.1.1.1/dns-query");
+    fn default_doh_url_has_a_certificate_bearing_pinned_host() {
+        assert_eq!(DEFAULT_DOH_URL, "https://cloudflare-dns.com/dns-query");
         assert!(crate::netguard::validate_doh_url(DEFAULT_DOH_URL).is_ok());
+        assert_eq!(PINNED_DOH_HOST, "cloudflare-dns.com");
+        assert_eq!(PINNED_DOH_IPV4, [Ipv4Addr::new(1, 1, 1, 1), Ipv4Addr::new(1, 0, 0, 1)]);
     }
 
     #[test]

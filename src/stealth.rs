@@ -1,7 +1,9 @@
 //! stealth — 15 anti-fingerprint / anti-analysis techniques. [PARTIAL]
-//! DNSSEC is a presence heuristic (not a crypto validator). WFP DNS
-//! blocking and the kill-switch *spawn* stay opt-in / stub at the FFI
-//! layer; command construction is sanitised.
+//! DNSSEC is a presence heuristic (not a crypto validator). Windows WFP DNS
+//! blocking is implemented in `dns_guard` but remains runtime-unverified;
+//! the legacy `trusted_dns` redirect is rejected until a signed callout exists,
+//! and kill-switch *spawn* still needs platform integration. Command
+//! construction is sanitised.
 
 use rand::seq::SliceRandom;
 use rand::Rng;

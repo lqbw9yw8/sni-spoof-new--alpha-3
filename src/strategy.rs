@@ -1,5 +1,5 @@
 //! strategy — adaptive technique selection by historical success score.
-//! [DONE], unit tested. Pure in-memory logic, no OS dependency.
+//! [UNTESTED]; unit tests are declared but were not executed in this checkout. Pure in-memory logic, no OS dependency.
 
 use dashmap::DashMap;
 use rand::Rng;

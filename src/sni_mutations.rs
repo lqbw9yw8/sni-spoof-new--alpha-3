@@ -1,4 +1,4 @@
-//! sni_mutations — 12 SNI-string mutation techniques. [DONE]
+//! sni_mutations — 12 SNI-string mutation techniques. [UNTESTED]
 //!
 //! Functions take/return the SNI host_name field, not a whole TLS record.
 //! `mutate_sni_full` chains a subset per [`MutationProfile`]. Wiring the

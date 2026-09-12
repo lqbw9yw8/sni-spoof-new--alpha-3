@@ -1,9 +1,11 @@
-//! relay — patterniha-style local TCP relay. [DONE]
+//! relay — patterniha-style local TCP relay. [PARTIAL]
 //!
 //! A TLS client (v2rayN, the OS, or any local SOCKS/HTTP front) connects to
 //! `127.0.0.1:<relay_listen_port>`; each accepted connection is relayed to
-//! the **single fixed destination** `<connect_ip>:<connect_port>`. Before the
-//! client's real ClientHello is forwarded, the Windows capture pipeline
+//! the configured destination `<connect_ip>:<connect_port>`. An optional
+//! operator-supplied `rotate_ips` list selects the next approved IP per
+//! connection; the client can never provide a destination. Before the client's
+//! real ClientHello is forwarded, the Windows capture pipeline
 //! injects a fake ClientHello carrying a benign SNI with a deliberately
 //! wrong TCP sequence number (`wrong_seq`), so a stateless DPI whitelists
 //! the flow on the benign name while the real server drops the fake.
@@ -13,8 +15,9 @@
 //! * **Binds 127.0.0.1 only.** Never `0.0.0.0`; non-loopback accepted peers
 //!   (which cannot happen on a loopback listener, but are checked anyway)
 //!   are dropped immediately.
-//! * **One fixed destination.** There is no way for a client to ask the
-//!   relay to connect somewhere else — this can never become an open proxy.
+//! * **Operator-fixed destination set.** There is no way for a client to ask
+//!   the relay to connect somewhere else — rotation is limited to the
+//!   validated operator list and can never become an open proxy.
 //! * **Fail-closed injection.** After the outbound 3WHS the relay waits up
 //!   to [`FAKE_ACK_WAIT`] for the pipeline to confirm that the server
 //!   ACKed/dupacked the fake. If `require_inject` is true and that
@@ -61,7 +64,13 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// What the relay must connect to, plus the fail-closed switch.
 #[derive(Clone, Debug)]
 pub struct RelayTarget {
+    /// Primary destination used when `rotate_ips` is empty.
     pub connect_ip: IpAddr,
+    /// Optional operator-supplied destination set. Each accepted relay
+    /// connection selects the next address in this list; the client still
+    /// controls neither the address nor the port, so this is fail-closed
+    /// failover/rotation rather than an open-proxy feature.
+    pub rotate_ips: Vec<IpAddr>,
     pub connect_port: u16,
     pub fake_sni: String,
     /// If true (the default), the relay drops a connection whose fake
@@ -72,6 +81,20 @@ pub struct RelayTarget {
     /// black-holed upstream sockets after a link flap. Set from
     /// `idle_timeout_secs` by the caller.
     pub idle_timeout: Duration,
+}
+
+fn selected_destination_ip(primary: IpAddr, rotate_ips: &[IpAddr], index: usize) -> IpAddr {
+    if rotate_ips.is_empty() {
+        return primary;
+    }
+    if index == 0 {
+        return rotate_ips[0];
+    }
+    // Reuse the same bounded/cyclic policy as the transparent connection
+    // module. The previous slot is the blocked value, so the helper returns
+    // the next operator-approved address without constructing a new list.
+    let previous = rotate_ips[(index - 1) % rotate_ips.len()];
+    crate::connection::rotate_ip(rotate_ips, previous).unwrap_or(rotate_ips[0])
 }
 
 /// Behaviour knobs for relay-mode evasion, carried by the pipeline (which
@@ -255,14 +278,16 @@ async fn relay_loop(
         }
     };
     log::info!(
-        "relay listening on {addr} -> {} (fake SNI {:?}, require_inject={})",
+        "relay listening on {addr} -> {} (fake SNI {:?}, require_inject={}, rotate_ips={})",
         crate::stealth::redact_socket_addr(&SocketAddr::new(
             target.connect_ip,
             target.connect_port
         )),
         target.fake_sni,
-        target.require_inject
+        target.require_inject,
+        target.rotate_ips.len()
     );
+    let mut rotation_index = 0usize;
 
     while running.load(Ordering::SeqCst) {
         let accept = tokio::select! {
@@ -286,7 +311,18 @@ async fn relay_loop(
             drop(client);
             continue;
         }
-        let target = target.clone();
+        let mut target = target.clone();
+        if !target.rotate_ips.is_empty() {
+            // The accept loop is single-threaded, so advancing this index
+            // needs no additional lock. Each connection receives one
+            // operator-approved address; the client cannot select it.
+            target.connect_ip = selected_destination_ip(
+                target.connect_ip,
+                &target.rotate_ips,
+                rotation_index,
+            );
+            rotation_index = rotation_index.wrapping_add(1);
+        }
         let cb = hooks.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_conn(client, target, cb).await {
@@ -379,6 +415,7 @@ async fn handle_conn(
     let ok = gate.wait(FAKE_ACK_WAIT).await;
 
     if target.require_inject && !ok {
+        crate::observability::relay_fail_closed();
         // Fail CLOSED: drop both sides without copying a single byte of
         // the client's real ClientHello. This is the whole point.
         log::warn!(
@@ -450,7 +487,8 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Pure handshake state machine (wrong_seq). No I/O; tested on every OS.
+// Pure handshake state machine (wrong_seq). No I/O; tests are declared but
+// the current Rust test run is unavailable.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -600,6 +638,33 @@ impl HandshakeMonitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rotation_uses_operator_set_and_wraps() {
+        let primary: IpAddr = "203.0.113.1".parse().unwrap();
+        let ips: Vec<IpAddr> = ["1.1.1.1", "1.0.0.1"]
+            .into_iter()
+            .map(|raw| raw.parse().unwrap())
+            .collect();
+        assert_eq!(selected_destination_ip(primary, &[], 0), primary);
+        assert_eq!(selected_destination_ip(primary, &ips, 0), ips[0]);
+        assert_eq!(selected_destination_ip(primary, &ips, 1), ips[1]);
+        assert_eq!(selected_destination_ip(primary, &ips, 2), ips[0]);
+    }
+
+    #[test]
+    fn rotation_is_not_an_open_proxy_selector() {
+        let primary: IpAddr = "203.0.113.1".parse().unwrap();
+        let ips: Vec<IpAddr> = ["1.1.1.1", "1.0.0.1"]
+            .into_iter()
+            .map(|raw| raw.parse().unwrap())
+            .collect();
+        // The selector only accepts the preconfigured slice; there is no
+        // caller-provided host/port argument anywhere in this path.
+        for index in 0..8 {
+            assert!(ips.contains(&selected_destination_ip(primary, &ips, index)));
+        }
+    }
 
     fn run_happy_path(mon: &mut HandshakeMonitor) {
         assert_eq!(

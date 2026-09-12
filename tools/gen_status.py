@@ -5,12 +5,17 @@ The point of this script is that the status table cannot drift from the
 code: it is derived, never hand-written. Run it after any change that adds
 or removes a module, a test, or a public function:
 
-    python3 tools/gen_status.py
+    python3 tools/gen_status.py           # regenerate TEST_MATRIX.md
+    python3 tools/gen_status.py --check   # CI: fail (exit 1) on drift
+
+`--check` never writes; it regenerates in memory, diffs against the
+committed file and prints the drift. The `<!-- commit: ... -->` marker line
+is ignored by the comparison so a fresh checkout cannot fail spuriously.
 
 What it can prove (static facts):
   * how many lines each module has
   * how many #[test] / #[tokio::test] functions it declares
-  * the [DONE]/[PARTIAL]/[STUB] tag in the module doc comment
+  * the [DONE]/[PARTIAL]/[STUB]/[UNTESTED]/[BLOCKED] tag in the module doc comment
   * whether each `pub fn` is called from production code, only from tests,
     or never
   * whether each Settings field is read by any engine module
@@ -87,7 +92,7 @@ def in_spans(pos, spans):
 
 def doc_tag(s):
     head = "\n".join(l for l in s.split("\n")[:40] if l.lstrip().startswith("//"))
-    m = re.search(r"\[(DONE|PARTIAL|STUB)\]", head)
+    m = re.search(r"\[(DONE|PARTIAL|STUB|UNTESTED|BLOCKED)\]", head)
     return m.group(1) if m else None
 
 
@@ -169,7 +174,24 @@ def ui_controls():
 
 
 def git_head():
+    """Short HEAD of THIS repository, or "unknown".
+
+    Audit F-01: `git -C ROOT rev-parse HEAD` happily walks *up* the
+    filesystem and returns the enclosing repository's HEAD when ROOT itself
+    is not a git checkout (that is exactly what happens in a sandbox that
+    unpacks the tarball). The marker in TEST_MATRIX.md then names a commit
+    that has nothing to do with this tree, which is worse than no marker.
+    Confirm the discovered toplevel really is ROOT before trusting HEAD.
+    """
     try:
+        top = subprocess.check_output(
+            ["git", "-C", ROOT, "rev-parse", "--show-toplevel"],
+            text=True, stderr=subprocess.DEVNULL).strip()
+    except Exception:
+        return "unknown"
+    try:
+        if os.path.realpath(top) != os.path.realpath(ROOT):
+            return "unknown"
         return subprocess.check_output(
             ["git", "-C", ROOT, "rev-parse", "--short", "HEAD"],
             text=True, stderr=subprocess.DEVNULL).strip()
@@ -185,6 +207,10 @@ def verification_level(mod, info, dead_by_mod, testonly_by_mod):
         return "STUB", "module doc declares STUB"
     if info["tag"] == "PARTIAL":
         return "PARTIAL", "module doc declares documented limits"
+    if info["tag"] == "UNTESTED":
+        return "UNTESTED", "module doc declares that current tests were not executed"
+    if info["tag"] == "BLOCKED":
+        return "BLOCKED", "module doc declares an unavailable dependency/platform"
     if mod in testonly_by_mod and len(testonly_by_mod[mod]) >= 3:
         n = len(testonly_by_mod[mod])
         return "PARTIAL", f"{n} pub fn are only reached from tests"
@@ -309,8 +335,44 @@ def main():
         w(f"* `{m}` — {a['mods'][m]['lines']} خط")
     w("")
 
+    body = "\n".join(L) + "\n"
+    summary = (f"({len(a['mods'])} modules, "
+               f"{tot_tests} tests declared, {len(a['dead'])} dead fns)")
+
+    # --check: verify the committed TEST_MATRIX.md still matches the source
+    # tree instead of rewriting it. This is what CI runs; exit 1 on drift so
+    # a hand-edited table cannot merge. The `<!-- commit: ... -->` marker is
+    # excluded from the comparison: it records which commit generated the
+    # table, so it differs on every fresh checkout by construction.
+    if "--check" in sys.argv:
+        path = os.path.join(ROOT, "TEST_MATRIX.md")
+        try:
+            with open(path, encoding="utf-8") as fh:
+                current = fh.read()
+        except OSError as e:
+            print(f"TEST_MATRIX.md unreadable: {e}")
+            return 1
+
+        def norm(text):
+            return [ln for ln in text.splitlines()
+                    if not ln.startswith("<!-- commit:")]
+
+        if norm(current) == norm(body):
+            print(f"TEST_MATRIX.md up to date {summary}")
+            return 0
+        import difflib
+        diff = difflib.unified_diff(
+            norm(current), norm(body),
+            fromfile="TEST_MATRIX.md (committed)",
+            tofile="TEST_MATRIX.md (regenerated)", lineterm="")
+        print("TEST_MATRIX.md is out of date with the source tree.\n"
+              "Run `python3 tools/gen_status.py` and commit the result.\n")
+        for line in diff:
+            print(line)
+        return 1
+
     with open(os.path.join(ROOT, "TEST_MATRIX.md"), "w", encoding="utf-8") as fh:
-        fh.write("\n".join(L) + "\n")
+        fh.write(body)
 
     with open(os.path.join(ROOT, "tools", "status.json"), "w", encoding="utf-8") as fh:
         json.dump({"commit": head, "modules": a["mods"],
@@ -319,8 +381,7 @@ def main():
                    "unwired": a["unwired"],
                    "dependencies": a["dep"]}, fh, indent=2, ensure_ascii=False)
 
-    print(f"TEST_MATRIX.md written  ({len(a['mods'])} modules, "
-          f"{tot_tests} tests declared, {len(a['dead'])} dead fns)")
+    print(f"TEST_MATRIX.md written  {summary}")
     return 0
 
 

@@ -1,80 +1,80 @@
 {
-  "commit": "045430e",
+  "commit": "42d9f52",
   "modules": {
     "anti_fingerprint": {
       "lines": 192,
       "tests": 8,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "autottl": {
       "lines": 308,
       "tests": 10,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "client_detect": {
       "lines": 158,
       "tests": 5,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 1,
       "unsafe": false
     },
     "config": {
-      "lines": 1531,
-      "tests": 30,
-      "tag": "DONE",
+      "lines": 1539,
+      "tests": 31,
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "connection": {
       "lines": 181,
       "tests": 7,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "dns_cache": {
-      "lines": 501,
-      "tests": 12,
-      "tag": "DONE",
+      "lines": 528,
+      "tests": 13,
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "dns_guard": {
-      "lines": 145,
+      "lines": 711,
       "tests": 5,
-      "tag": "DONE",
-      "win": 1,
-      "unsafe": false
+      "tag": "PARTIAL",
+      "win": 3,
+      "unsafe": true
     },
     "doh": {
-      "lines": 604,
-      "tests": 16,
-      "tag": "DONE",
+      "lines": 755,
+      "tests": 19,
+      "tag": "PARTIAL",
       "win": 0,
       "unsafe": false
     },
     "ech": {
-      "lines": 828,
+      "lines": 837,
       "tests": 12,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "engine": {
-      "lines": 522,
+      "lines": 678,
       "tests": 0,
       "tag": "PARTIAL",
       "win": 0,
       "unsafe": true
     },
     "engine_stub": {
-      "lines": 139,
+      "lines": 143,
       "tests": 3,
-      "tag": null,
+      "tag": "STUB",
       "win": 1,
       "unsafe": false
     },
@@ -86,23 +86,23 @@
       "unsafe": false
     },
     "fail_open": {
-      "lines": 110,
-      "tests": 5,
-      "tag": "DONE",
+      "lines": 127,
+      "tests": 6,
+      "tag": "UNTESTED",
       "win": 1,
       "unsafe": false
     },
     "fooling": {
       "lines": 275,
       "tests": 8,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "fragmentation": {
-      "lines": 1075,
+      "lines": 1084,
       "tests": 25,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
@@ -114,58 +114,58 @@
       "unsafe": false
     },
     "handle_retire": {
-      "lines": 130,
+      "lines": 131,
       "tests": 8,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "hpke": {
       "lines": 1041,
       "tests": 12,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "http_host": {
       "lines": 305,
       "tests": 9,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "integrity": {
-      "lines": 107,
+      "lines": 128,
       "tests": 4,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "isp_profiles": {
       "lines": 207,
       "tests": 5,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "lib": {
-      "lines": 300,
+      "lines": 309,
       "tests": 7,
-      "tag": "DONE",
+      "tag": null,
       "win": 2,
       "unsafe": false
     },
     "main": {
-      "lines": 1347,
+      "lines": 1393,
       "tests": 7,
       "tag": null,
       "win": 8,
       "unsafe": false
     },
     "mobile_gateway": {
-      "lines": 126,
+      "lines": 125,
       "tests": 3,
-      "tag": "DONE",
+      "tag": "PARTIAL",
       "win": 1,
       "unsafe": false
     },
@@ -177,51 +177,58 @@
       "unsafe": false
     },
     "netguard": {
-      "lines": 286,
-      "tests": 12,
-      "tag": "DONE",
+      "lines": 391,
+      "tests": 15,
+      "tag": "UNTESTED",
+      "win": 0,
+      "unsafe": false
+    },
+    "observability": {
+      "lines": 317,
+      "tests": 2,
+      "tag": "PARTIAL",
       "win": 0,
       "unsafe": false
     },
     "packet": {
-      "lines": 845,
-      "tests": 10,
-      "tag": "DONE",
+      "lines": 896,
+      "tests": 12,
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "pipeline": {
-      "lines": 3315,
+      "lines": 3323,
       "tests": 50,
-      "tag": "DONE",
+      "tag": "PARTIAL",
       "win": 0,
       "unsafe": false
     },
     "proxy_cleanup": {
       "lines": 177,
       "tests": 4,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 2,
       "unsafe": false
     },
     "quic": {
-      "lines": 478,
-      "tests": 11,
+      "lines": 528,
+      "tests": 13,
       "tag": null,
       "win": 0,
       "unsafe": false
     },
     "relay": {
-      "lines": 807,
-      "tests": 9,
-      "tag": "DONE",
+      "lines": 872,
+      "tests": 11,
+      "tag": "PARTIAL",
       "win": 0,
       "unsafe": false
     },
     "scanner": {
-      "lines": 737,
+      "lines": 714,
       "tests": 13,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
@@ -235,26 +242,26 @@
     "sequence": {
       "lines": 461,
       "tests": 14,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "singleton": {
       "lines": 344,
       "tests": 3,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 8,
       "unsafe": true
     },
     "sni_mutations": {
       "lines": 542,
       "tests": 20,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "stealth": {
-      "lines": 537,
+      "lines": 539,
       "tests": 17,
       "tag": "PARTIAL",
       "win": 0,
@@ -263,7 +270,7 @@
     "strategy": {
       "lines": 399,
       "tests": 11,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
@@ -277,14 +284,14 @@
     "warmup": {
       "lines": 129,
       "tests": 2,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     },
     "webui": {
-      "lines": 1251,
+      "lines": 1276,
       "tests": 17,
-      "tag": "DONE",
+      "tag": "UNTESTED",
       "win": 0,
       "unsafe": false
     }
@@ -294,6 +301,9 @@
     "connection": [
       "health_from_probe",
       "smart_backoff"
+    ],
+    "dns_guard": [
+      "hijack_dns_requests_target"
     ],
     "fooling": [
       "build_udp_len_decoy"
@@ -306,6 +316,10 @@
     ],
     "http_host": [
       "tls_cuts_before_sni"
+    ],
+    "integrity": [
+      "hash_is_pinned",
+      "sha256_hex_file"
     ],
     "packet": [
       "wrap_ipv4_tcp",
@@ -380,6 +394,7 @@
       "fragmentation",
       "handle_retire",
       "integrity",
+      "observability",
       "packet",
       "sequence"
     ],
@@ -391,7 +406,8 @@
       "packet"
     ],
     "fail_open": [
-      "error"
+      "error",
+      "observability"
     ],
     "fooling": [
       "error",
@@ -445,6 +461,7 @@
       "geedge",
       "hpke",
       "http_host",
+      "observability",
       "packet",
       "quic",
       "relay",
@@ -463,11 +480,13 @@
       "packet"
     ],
     "relay": [
+      "connection",
       "error",
+      "observability",
       "stealth"
     ],
     "scanner": [
-      "fragmentation"
+      "netguard"
     ],
     "self_update": [
       "error"

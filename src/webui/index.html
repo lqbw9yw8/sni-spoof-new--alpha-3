@@ -225,7 +225,7 @@
   </div>
   <div class="note warn" id="dns_leak_note">
     <b>نشتی DNS:</b>
-    مسدودسازی پورت ۵۳ با WFP در این build یک <b>stub</b> است — سیستم‌عامل هنوز می‌تواند UDP/53 بفرستد.
+    در Windows، مسدودسازی پورت ۵۳ با WFP واقعی و fail-closed است (به‌جز resolver محلی 127.0.0.1 و ::1). اگر WFP نصب نشود، برنامه اصلاً ادامه نمی‌دهد.
     قوی‌ترین تنظیم این‌جا: <code>relay_connect_host</code> را یک <b>IP مستقیم</b> بگذارید.
     اگر از v2rayN استفاده می‌کنید، DNS را <b>داخل خود v2rayN</b> تنظیم کنید (Basic DNS Settings):
     Remote DNS = یک آدرس DoH مثل <span class="kbd">https://dns.adguard.com/dns-query</span>،
@@ -496,14 +496,14 @@ const FIELDS = [
 
   // ---- dns ----
   { k: "doh_server", s: "dns", t: "str", lbl: "آدرس سرور DoH", mono: true,
-    placeholder: "https://1.1.1.1/dns-query",
-    help: "باید https:// باشد، بدون user:pass@ و هرگز loopback/metadata. IP مستقیم مرحلهٔ bootstrap را رد می‌کند." },
-  { k: "trusted_dns", s: "dns", t: "str", lbl: "سرور DNS مورد اعتماد (IP)", mono: true,
-    placeholder: "1.1.1.1 — خالی = خاموش",
-    help: "سرور DNS که پرس‌وجوها به آن هدایت می‌شوند. توجه: hijack DNS با WFP در این build یک stub است، پس این مقدار اعتبارسنجی می‌شود ولی روی سیم اعمال نمی‌شود. خالی‌گذاشتن، کلید را حذف می‌کند." },
+    placeholder: "https://cloudflare-dns.com/dns-query",
+    help: "باید https:// باشد، بدون user:pass@ و هرگز loopback/metadata. مقدار پیش‌فرض hostname دارای گواهی TLS است و آدرس‌های Cloudflare را pin می‌کند." },
+  { k: "trusted_dns", s: "dns", t: "str", lbl: "DNS redirect legacy (غیرفعال)", mono: true,
+    placeholder: "Unsupported — leave empty",
+    help: "این گزینه عمداً fail-closed است: redirect واقعی DNS به signed WFP kernel callout نیاز دارد که همراه برنامه نیست. برای DoH از doh_server یا relay_resolve_doh استفاده کنید؛ مقدار غیرخالی ذخیره نمی‌شود." },
   { k: "rotate_ips", s: "dns", t: "strlist", lbl: "فهرست چرخش IP مقصد", mono: true,
     placeholder: "1.1.1.1,1.0.0.1",
-    help: "توجه: پذیرفته و اعتبارسنجی می‌شود، ولی در این build روی سیم اعمال نمی‌شود. خالی = خاموش." },
+    help: "فقط در relay mode: هر اتصال جدید IP بعدیِ همین فهرست اعتبارسنجی‌شده را می‌گیرد؛ جریان‌های شفاف وسط اتصال بازنویسی نمی‌شوند. در transparent mode خالی بگذارید." },
   { k: "sni_only", s: "dns", t: "strlist", lbl: "فقط این SNIها (allow-list)", mono: true,
     placeholder: "*.example.com,keep.org",
     help: "اگر خالی نباشد، جهش/تزریق فقط روی SNIهای منطبق اعمال می‌شود. الگو: دقیق یا *.example.com." },
@@ -528,7 +528,7 @@ const FIELDS = [
     help: "فقط حرف/رقم/فاصله/خط تیره/زیرخط، تا دستور قابل تزریق نباشد. وقتی کلید قطع روشن است الزامی است. فقط در شروع خوانده می‌شود؛ برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
   { k: "win_divert_sha256", s: "ops", t: "strlist", lbl: "پین SHA-256 درایور WinDivert", restart: true, mono: true, secret: true,
     placeholder: "۶۴ نویسهٔ هگز — خالی = تغییر نده",
-    help: "محافظت زنجیرهٔ تأمین: فقط درایوری بارگذاری می‌شود که با یکی از این هش‌ها مطابقت داشته باشد. راستی‌آزمایی فقط در شروع انجام می‌شود؛ برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
+    help: "محافظت زنجیرهٔ تأمین: خالی = بدون pin؛ در غیر این صورت دقیقاً دو هش به‌ترتیب WinDivert.dll و WinDivert64.sys وارد کنید. راستی‌آزمایی فقط در شروع انجام می‌شود؛ برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
   // ---- isp: ISP profile & scanner ----
   { k: "isp_profile", s: "isp", t: "enum", lbl: "پروفایل اپراتور", restart: true,
     opts: ["auto", "mci", "irancell", "russia", "china", "generic"],
@@ -665,6 +665,8 @@ function validateField(f, raw) {
   }
   if (f.t === "strlist") {
     const items = listVal(s);
+    if (f.k === "win_divert_sha256" && items.length !== 0 && items.length !== 2)
+      return "Enter exactly two pins: WinDivert.dll, then WinDivert64.sys";
     for (const it of items) {
       if (f.k === "win_divert_sha256" && !isHex64(it)) return "Each pin must be exactly 64 hex characters";
       if (f.k === "rotate_ips" && !isIP(it)) return "Invalid IP: " + it;
@@ -718,7 +720,7 @@ function validateField(f, raw) {
       return "";
     }
     case "trusted_dns":
-      return isIP(s) ? "" : "Must be a valid IP";
+      return s.trim() === "" ? "" : "Unsupported: signed WFP redirect callout is not shipped";
     case "kill_switch_adapter":
       return /^[A-Za-z0-9 _-]+$/.test(s) ? "" : "Letters/digits/space/hyphen/underscore only";
     case "web_ui_token":
@@ -850,7 +852,7 @@ function renderFields() {
         '<div class="lab">This is not v2rayN\'s DNS settings</div>' +
         '<div class="help">The Basic / Advanced / V2ray Custom / sing-box Custom tabs stay in the client. ' +
         'Domestic DNS, Proxy Target Strategy, Parallel Query, and Happy Eyeballs don\'t exist here because this crate isn\'t a DNS router. ' +
-        'Port 53 is never intercepted. The DoH cache always serves stale answers for up to 6 hours (MAX_STALE) — it has no separate key. ' +
+        'WinDivert does not intercept port 53; on Windows, the mandatory WFP guard blocks outbound plaintext DNS except loopback. The DoH cache always serves stale answers for up to 6 hours (MAX_STALE) — it has no separate key. ' +
         'Only A records (IPv4) are queried.</div></div></div></div>'
       : "";
     el.innerHTML =
@@ -1245,6 +1247,26 @@ $("btn_toml_load").addEventListener("click", async () => {
   try { $("toml").value = String(await api("/api/config/toml") || ""); msg("متن کانفیگ بارگذاری شد", "ok"); }
   catch (e) { msg("خطا: " + e.message, "bad"); }
 });
+function confirmRawDangerousToml(body) {
+  const risky = [];
+  // This is only a confirmation gate; the server remains the TOML authority.
+  // Parse booleans by lines rather than relying on dynamically-built regexes,
+  // so the raw editor cannot silently bypass a warning due to escaping.
+  const lines = String(body).split(/\r?\n/);
+  const boolValue = (key, wanted) => lines.some((line) => {
+    const pair = line.split("=", 2);
+    return pair.length === 2 && pair[0].trim() === key && pair[1].trim() === wanted;
+  });
+  if (boolValue("intercept_all_tcp", "true")) risky.push("intercept_all_tcp");
+  if (boolValue("intercept_all_udp", "true")) risky.push("intercept_all_udp");
+  if (boolValue("enable_swap_foolers", "true")) risky.push("enable_swap_foolers");
+  if (boolValue("enable_oob_injection", "true")) risky.push("enable_oob_injection");
+  if (boolValue("relay_require_inject", "false")) risky.push("relay_require_inject=false");
+  if (!risky.length) return true;
+  return confirm("Raw TOML enables risky settings: " + risky.join(", ") +
+    ". The normal field-level confirmation was bypassed. Save anyway?");
+}
+
 $("btn_toml_validate").addEventListener("click", async () => {
   const body = $("toml").value;
   try {
@@ -1257,7 +1279,9 @@ $("btn_toml_validate").addEventListener("click", async () => {
 });
 $("btn_toml_save").addEventListener("click", async () => {
   try {
-    if (await postConfig($("toml").value)) setTimeout(() => { loadConfig(true).catch(() => {}); }, 1400);
+    const body = $("toml").value;
+    if (!confirmRawDangerousToml(body)) return;
+    if (await postConfig(body)) setTimeout(() => { loadConfig(true).catch(() => {}); }, 1400);
   } catch (e) { msg("خطا: " + e.message, "bad"); }
 });
 

@@ -86,6 +86,10 @@ pub struct RelayId {
     pub connect_host: String,
     pub connect_port: u16,
     pub fake_sni: String,
+    /// Operator-approved relay destination rotation set. It is used only by
+    /// relay-mode accepted connections; transparent packet flows cannot
+    /// change destination IPs without breaking an established TCP flow.
+    pub rotate_ips: Vec<String>,
     pub resolve_doh: bool,
     pub doh_server: String,
     pub mutate_real_sni: bool,
@@ -136,6 +140,7 @@ impl RelayId {
             connect_host,
             connect_port: settings.relay_connect_port,
             fake_sni,
+            rotate_ips: settings.rotate_ips.clone(),
             resolve_doh: settings.relay_resolve_doh,
             doh_server: settings.doh_server.clone(),
             mutate_real_sni: settings.relay_mutate_real_sni,
@@ -227,8 +232,13 @@ impl RelayRuntime {
                 require_inject: want.require_inject,
             }));
         }
+        let rotate_ips: Vec<std::net::IpAddr> = dpi_guard::connection::parse_ip_list(&want.rotate_ips)
+            .into_iter()
+            .filter(|ip| dpi_guard::netguard::validate_relay_ip(*ip).is_ok())
+            .collect();
         let target = dpi_guard::relay::RelayTarget {
             connect_ip,
+            rotate_ips,
             connect_port: want.connect_port,
             fake_sni: want.fake_sni.clone(),
             require_inject: want.require_inject,
@@ -499,10 +509,28 @@ fn backend_main() {
     // the check used to run after the startup threads below were spawned).
     // version_check only reads files next to the exe plus the startup-only
     // win_divert_sha256 pins, so moving it here changes nothing else.
-    if let Err(e) = engine::version_check(&settings.win_divert_sha256) {
-        log::error!("{e}");
-        std::process::exit(1);
-    }
+    let _driver_pin = match engine::version_check(&settings.win_divert_sha256) {
+        Ok(pin) => pin,
+        Err(e) => {
+            log::error!("{e}");
+            std::process::exit(1);
+        }
+    };
+
+    // Install the dynamic WFP DNS guard before any startup handler can make a
+    // network request. It blocks outbound plaintext TCP/UDP 53 except the
+    // operator's loopback resolver. Failure is fail-closed: continuing would
+    // falsely claim DNS leak protection that is not present.
+    let _dns_wfp_guard = match dpi_guard::dns_guard::block_port_53_except_localhost() {
+        Ok(guard) => {
+            log::info!("WFP DNS protection installed (port 53 blocked except loopback)");
+            guard
+        }
+        Err(e) => {
+            log::error!("cannot install mandatory WFP DNS protection: {e}");
+            std::process::exit(1);
+        }
+    };
 
     // ── Startup handlers for the settings that used to be inert ───────────
     //
@@ -648,14 +676,20 @@ fn backend_main() {
                             "probe [{}]: {} ({}) -> {} ms [OK]",
                             pair.provider,
                             dpi_guard::stealth::redact_endpoint(&pair.connect_ip),
-                            pair.fake_sni,
+                            dpi_guard::stealth::hash_sensitive(
+                                &pair.fake_sni,
+                                dpi_guard::stealth::run_salt(),
+                            ),
                             ms
                         ),
                         None => log::debug!(
                             "probe [{}]: {} ({}) -> timeout / unreachable",
                             pair.provider,
                             dpi_guard::stealth::redact_endpoint(&pair.connect_ip),
-                            pair.fake_sni
+                            dpi_guard::stealth::hash_sensitive(
+                                &pair.fake_sni,
+                                dpi_guard::stealth::run_salt(),
+                            )
                         ),
                     }
                 }
@@ -664,7 +698,10 @@ fn backend_main() {
                 {
                     log::info!(
                         "SNI scanner: BEST CANDIDATE => {} ({}) with ping {} ms",
-                        best.fake_sni,
+                        dpi_guard::stealth::hash_sensitive(
+                            &best.fake_sni,
+                            dpi_guard::stealth::run_salt(),
+                        ),
                         dpi_guard::stealth::redact_endpoint(&best.connect_ip),
                         best_ms
                     );
@@ -690,7 +727,10 @@ fn backend_main() {
                 _ => pool.next_round_robin(),
             };
             if let Some(sni) = picked {
-                log::info!("SNI scanner: next in rotation = {sni}");
+                log::info!(
+                    "SNI scanner: next in rotation = {}",
+                    dpi_guard::stealth::hash_sensitive(sni, dpi_guard::stealth::run_salt())
+                );
             }
         }
         let edges: Vec<String> = if settings.edge_candidates.is_empty() {
@@ -715,43 +755,24 @@ fn backend_main() {
         );
     }
 
-    // Audit F-003: switches that are still only partly implemented. Each one
-    // is named with exactly what is missing, so nothing silently does nothing.
-    for (name, enabled, gap) in [
-        (
-            "enable_mobile_gateway",
-            settings.enable_mobile_gateway,
-            "reports the LAN but does not open a LAN listener",
-        ),
-        (
-            "trusted_dns",
-            settings.trusted_dns.is_some(),
-            "the WFP DNS hijack it feeds is a stub, so port-53 redirection is not enforced",
-        ),
-        (
-            "rotate_ips",
-            !settings.rotate_ips.is_empty(),
-            "no destination-IP rotation happens on the wire",
-        ),
-    ] {
-        if enabled {
-            log::warn!("{name} is set but {gap} (audit F-003)");
-        }
+    // Audit F-003: destination rotation is no longer a silent no-op: relay
+    // connections consume the validated list in RelayTarget; transparent
+    // flows are explicitly not rewritten mid-connection.
+    if !settings.rotate_ips.is_empty() {
+        log::info!(
+            "relay destination rotation armed for {} operator-approved IP(s); \
+             transparent flows remain on their established destination",
+            settings.rotate_ips.len()
+        );
     }
 
-    if let Some(tdns) = &settings.trusted_dns {
-        if let Ok(ip) = tdns.parse() {
-            let _ = dpi_guard::dns_guard::hijack_dns_requests_target(ip);
-        }
-    }
-    let _ = dpi_guard::connection::parse_ip_list(&settings.rotate_ips);
     let _ = dpi_guard::dns_guard::init_wfp_hook_spec();
     let _ = dpi_guard::dns_guard::dns_protection_filters();
     let _ = dpi_guard::dns_guard::block_port_53_except_localhost_spec();
 
-    log::warn!(
-        "DNS leak protection is INACTIVE (WFP FFI is a stub): port-53 queries are plaintext. \
-         SNI mutation does not hide the domain from a resolver that logs queries. Use DoH/DoT."
+    log::info!(
+        "plaintext DNS protection is active: WFP blocks outbound port 53 except loopback; \
+         DoH remains the resolver path for relay destinations."
     );
 
     if settings.enable_kill_switch {
@@ -797,6 +818,7 @@ fn backend_main() {
             .spawn(move || {
                 engine::capture_loop(&filter, running, injection_delay, move |raw| {
                     processed.fetch_add(1, Ordering::Relaxed);
+                    dpi_guard::observability::packet_processed();
                     let mut p = dpi_guard::recover_mutex(&pipeline);
                     let result = p.handle(&raw);
                     // A packet counts as "mutated" when the pipeline replaced it
@@ -804,6 +826,7 @@ fn backend_main() {
                     if let Ok(dpi_guard::fail_open::WireAction::Send(pkts)) = &result {
                         if pkts.len() != 1 || pkts[0] != raw {
                             mutated.fetch_add(1, Ordering::Relaxed);
+                            dpi_guard::observability::packet_mutated();
                         }
                     }
                     result
@@ -861,9 +884,20 @@ fn backend_main() {
     let requested_profile = Arc::new(Mutex::new(None::<String>));
     if settings.enable_web_ui {
         let token = if settings.web_ui_token.is_empty() {
+            // A generated bearer token is a secret. Never send it through
+            // log::/eprintln! when stderr is redirected to a file, service
+            // manager, or pipe. GUI/service launches have no interactive
+            // terminal, so they must configure a token explicitly instead
+            // of silently creating an undiscoverable dashboard.
+            if !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+                log::error!(
+                    "web UI is enabled but web_ui_token is empty and stderr is not an interactive terminal; refusing to generate a secret into redirected output"
+                );
+                std::process::exit(1);
+            }
             let t = dpi_guard::stealth::generate_token();
-            eprintln!("web UI token (auto-generated, not written to the log file): {t}");
-            log::info!("web UI token generated; paste it at http://127.0.0.1:{}/ — not stored in log macros", settings.web_ui_port);
+            eprintln!("web UI token (interactive terminal only): {t}");
+            log::info!("web UI token generated for the interactive terminal; token value is never sent to logs");
             t
         } else {
             settings.web_ui_token.clone()
@@ -888,8 +922,6 @@ fn backend_main() {
     let reload_path = settings_path.clone();
     let reload_snapshot = snapshot.clone();
     let reload_requested = requested_profile.clone();
-    let reload_processed = processed.clone();
-    let reload_mutated = mutated.clone();
     let reload_settings = settings.clone();
     let reload_stop_tx = stop_tx;
     std::thread::spawn(move || {
@@ -983,6 +1015,8 @@ fn backend_main() {
                     log::info!("mutation profile set via web UI: {prof}");
                     p.settings.mutation_profile = prof;
                 }
+                let metrics = dpi_guard::observability::snapshot();
+                dpi_guard::observability::checkpoint();
                 let mut snap = dpi_guard::recover_mutex(&reload_snapshot);
                 *snap = webui::DashboardSnapshot {
                     mutation_profile: p.settings.mutation_profile.clone(),
@@ -993,8 +1027,15 @@ fn backend_main() {
                     enable_sni_fragmentation: p.settings.enable_sni_fragmentation,
                     enable_swap_foolers: p.settings.enable_swap_foolers,
                     enable_kill_switch: p.settings.enable_kill_switch,
-                    processed_packets: reload_processed.load(Ordering::Relaxed),
-                    mutated_packets: reload_mutated.load(Ordering::Relaxed),
+                    processed_packets: metrics.processed_packets,
+                    mutated_packets: metrics.mutated_packets,
+                    held_packets: metrics.held_packets,
+                    fail_open_events: metrics.fail_open_events,
+                    injection_attempts: metrics.injection_attempts,
+                    injection_successes: metrics.injection_successes,
+                    injection_failures: metrics.injection_failures,
+                    relay_fail_closed: metrics.relay_fail_closed,
+                    capture_errors: metrics.capture_errors,
                     doh_state: if p.settings.relay_enabled && p.settings.relay_resolve_doh {
                         "enabled".to_string()
                     } else {
@@ -1100,6 +1141,7 @@ fn backend_main() {
         match capture.join() {
             Ok(Ok(())) => break,
             Ok(Err(e)) => {
+                dpi_guard::observability::capture_error();
                 capture_attempts += 1;
                 if capture_attempts > CAPTURE_MAX_RETRIES {
                     log::error!("capture loop still failing after {CAPTURE_MAX_RETRIES} retries: {e}; giving up");
@@ -1120,6 +1162,7 @@ fn backend_main() {
                 );
             }
             Err(_) => {
+                dpi_guard::observability::capture_error();
                 capture_attempts += 1;
                 if capture_attempts > CAPTURE_MAX_RETRIES {
                     log::error!("capture thread kept panicking after {CAPTURE_MAX_RETRIES} retries; giving up");
@@ -1266,6 +1309,7 @@ mod tests {
             connect_host: "1.1.1.1".into(),
             connect_port: 443,
             fake_sni: "www.bing.com".into(),
+            rotate_ips: Vec::new(),
             resolve_doh: false,
             doh_server: "".into(),
             mutate_real_sni: false,
@@ -1288,6 +1332,7 @@ mod tests {
             connect_host: "127.0.0.1".into(),
             connect_port: 443,
             fake_sni: "www.bing.com".into(),
+            rotate_ips: Vec::new(),
             resolve_doh: false,
             doh_server: "".into(),
             mutate_real_sni: false,
@@ -1303,6 +1348,7 @@ mod tests {
             connect_host: "not_an_ip".into(),
             connect_port: 443,
             fake_sni: "www.bing.com".into(),
+            rotate_ips: Vec::new(),
             resolve_doh: false,
             doh_server: "".into(),
             mutate_real_sni: false,

@@ -1,4 +1,4 @@
-//! webui — opt-in local dashboard. [DONE] (std-only, no new dependencies)
+//! webui — opt-in local dashboard. [UNTESTED] (std-only, no new dependencies)
 //!
 //! A deliberately *safe* control surface, unlike the earlier sibling
 //! project that bound a control panel to `0.0.0.0` with no auth:
@@ -76,6 +76,15 @@ pub struct DashboardSnapshot {
     /// replacement or a changed single packet) — the interception
     /// effectiveness metric for the overview cards.
     pub mutated_packets: u64,
+    /// Operational counters written to the bounded JSON-lines log as well
+    /// as exposed here; these are not inferred from GUI history.
+    pub held_packets: u64,
+    pub fail_open_events: u64,
+    pub injection_attempts: u64,
+    pub injection_successes: u64,
+    pub injection_failures: u64,
+    pub relay_fail_closed: u64,
+    pub capture_errors: u64,
     /// Human-readable DoH state for the overview ("off" / "enabled",
     /// plus last-resolution outcome when the relay is running).
     pub doh_state: String,
@@ -148,6 +157,13 @@ impl Default for DashboardSnapshot {
             enable_kill_switch: false,
             processed_packets: 0,
             mutated_packets: 0,
+            held_packets: 0,
+            fail_open_events: 0,
+            injection_attempts: 0,
+            injection_successes: 0,
+            injection_failures: 0,
+            relay_fail_closed: 0,
+            capture_errors: 0,
             doh_state: "off".into(),
             driver_handles_live: false,
             driver_handles_retired: 0,
@@ -768,7 +784,7 @@ fn status_json(s: &DashboardSnapshot) -> String {
         .collect();
     let ports: Vec<String> = s.intercept_ports.iter().map(|p| p.to_string()).collect();
     format!(
-        r#"{{"mutation_profile":"{}","decoy_ttl":{},"idle_timeout_secs":{},"fragment_chunk_size":{},"enable_decoys":{},"enable_sni_fragmentation":{},"enable_swap_foolers":{},"enable_kill_switch":{},"processed_packets":{},"strategy_scores":[{}],"recent_domains":[{}],"intercept_ports":[{}],"enable_quic_port_bypass":{},"enable_sni_disguise":{},"fronting_benign_sni":"{}","enable_utls_fingerprint":{},"enable_ech_grease":{},"relay_enabled":{},"relay_listen_port":{},"relay_require_inject":{},"relay_connect_host":"{}","relay_connect_port":{},"relay_fake_sni":"{}","enable_sni_scanner":{},"isp_profile":"{}","sni_rotation_mode":"{}","enable_anti_fingerprint":{},"enable_reverse_frag":{},"enable_wrong_seq":{},"enable_wrong_checksum":{},"enable_oob_injection":{},"enable_hostdot":{},"max_payload_size":{},"fake_resend_count":{},"enable_self_update":{},"enable_client_detect":{},"enable_proxy_cleanup":{},"enable_youtube_warmup":{},"enable_mobile_gateway":{},"autottl_scale_a1":{},"autottl_scale_a2":{},"autottl_scale_max":{},"mutated_packets":{},"doh_state":"{}","driver_handles_live":{},"driver_handles_retired":{},"uptime_secs":{}}}"#,
+        r#"{{"mutation_profile":"{}","decoy_ttl":{},"idle_timeout_secs":{},"fragment_chunk_size":{},"enable_decoys":{},"enable_sni_fragmentation":{},"enable_swap_foolers":{},"enable_kill_switch":{},"processed_packets":{},"held_packets":{},"fail_open_events":{},"injection_attempts":{},"injection_successes":{},"injection_failures":{},"relay_fail_closed":{},"capture_errors":{},"strategy_scores":[{}],"recent_domains":[{}],"intercept_ports":[{}],"enable_quic_port_bypass":{},"enable_sni_disguise":{},"fronting_benign_sni":"{}","enable_utls_fingerprint":{},"enable_ech_grease":{},"relay_enabled":{},"relay_listen_port":{},"relay_require_inject":{},"relay_connect_host":"{}","relay_connect_port":{},"relay_fake_sni":"{}","enable_sni_scanner":{},"isp_profile":"{}","sni_rotation_mode":"{}","enable_anti_fingerprint":{},"enable_reverse_frag":{},"enable_wrong_seq":{},"enable_wrong_checksum":{},"enable_oob_injection":{},"enable_hostdot":{},"max_payload_size":{},"fake_resend_count":{},"enable_self_update":{},"enable_client_detect":{},"enable_proxy_cleanup":{},"enable_youtube_warmup":{},"enable_mobile_gateway":{},"autottl_scale_a1":{},"autottl_scale_a2":{},"autottl_scale_max":{},"mutated_packets":{},"doh_state":"{}","driver_handles_live":{},"driver_handles_retired":{},"uptime_secs":{}}}"#,
         json_escape(&s.mutation_profile),
         s.decoy_ttl,
         s.idle_timeout_secs,
@@ -778,6 +794,13 @@ fn status_json(s: &DashboardSnapshot) -> String {
         s.enable_swap_foolers,
         s.enable_kill_switch,
         s.processed_packets,
+        s.held_packets,
+        s.fail_open_events,
+        s.injection_attempts,
+        s.injection_successes,
+        s.injection_failures,
+        s.relay_fail_closed,
+        s.capture_errors,
         scores.join(","),
         domains.join(","),
         ports.join(","),
@@ -1018,6 +1041,8 @@ mod tests {
         assert!(j.contains("\"relay_connect_host\":\"\""));
         assert!(j.contains("\"relay_connect_port\":443"));
         assert!(j.contains("\"mutated_packets\":0"));
+        assert!(j.contains("\"fail_open_events\":0"));
+        assert!(j.contains("\"injection_successes\":0"));
         assert!(j.contains("\"doh_state\":\"off\""));
         assert!(j.contains("\"driver_handles_live\":false"));
         assert!(j.contains("\"driver_handles_retired\":0"));
@@ -1028,7 +1053,7 @@ mod tests {
     fn settings_json_redacts_token_and_pins_but_has_relay() {
         let s = crate::config::Settings {
             web_ui_token: "0123456789abcdef".into(),
-            win_divert_sha256: vec!["a".repeat(64)],
+            win_divert_sha256: vec!["a".repeat(64), "b".repeat(64)],
             relay_enabled: true,
             relay_connect_host: "1.1.1.1".into(),
             relay_fake_sni: "www.microsoft.com".into(),

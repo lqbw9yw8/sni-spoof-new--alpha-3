@@ -1,5 +1,5 @@
 //! fragmentation — locate SNI, splice it, split ClientHello across TCP
-//! segments. [DONE] for byte math; live send is the capture loop.
+//! segments. [UNTESTED] for byte math; live send is the capture loop.
 //!
 //! `fragment_sni_byte_chunk` returns **TCP-payload slices** of the original
 //! TLS record (before-SNI / each SNI byte / after-SNI). They are not
@@ -275,6 +275,15 @@ pub fn splice_sni(record: &[u8], new_sni: &[u8]) -> Result<Vec<u8>, DpiGuardErro
     let loc = info.sni.ok_or(DpiGuardError::SniNotFound)?;
     let old_len = loc.name_end - loc.name_start;
     let delta = new_sni.len() as i32 - old_len as i32;
+    let new_record_len = (record.len() as i64) + i64::from(delta);
+    // TLS record length is a u16 body length, so the complete wire record
+    // cannot exceed 5 + 65535 bytes. Never let patch_u16 clamp a wrapped
+    // length field and emit a structurally corrupt record.
+    if new_record_len < 5 || new_record_len > 5 + i64::from(u16::MAX) {
+        return Err(DpiGuardError::OutOfRange(
+            "SNI splice would exceed the TLS record length limit".into(),
+        ));
+    }
 
     let mut out = Vec::with_capacity(record.len() + delta.max(0) as usize);
     out.extend_from_slice(&record[..loc.name_start]);

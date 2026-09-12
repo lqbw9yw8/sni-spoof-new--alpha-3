@@ -1,4 +1,4 @@
-//! config — TOML settings + mtime hot-reload. [DONE]
+//! config — TOML settings + mtime hot-reload. [UNTESTED]
 //! `HotReloadWatcher::new` snapshots the current mtime so the first
 //! `reload_if_changed` is a no-op unless the file actually changes.
 
@@ -20,18 +20,13 @@ pub struct Settings {
     pub decoy_ttl: u8,
     #[serde(default = "default_idle_secs")]
     pub idle_timeout_secs: u64,
-    /// Optional upstream resolver to trust. `None` = feature off.
+    /// Legacy DNS redirect target. It is retained only so old configuration
+    /// files can be diagnosed and removed without an unknown-key error.
     ///
-    /// `skip_serializing_if` matters: the `toml` serializer rejects a
-    /// `None` value outright (`UnsupportedNone`), and both
-    /// `redacted_toml` (the dashboard's advanced editor) and
-    /// `merge_partial` (the dashboard's save path) round-trip the whole
-    /// struct through `toml::to_string`. Without this attribute a default
-    /// config — where `trusted_dns` is `None` — could not be saved from
-    /// the dashboard at all.
-    /// PARTIAL (audit F-003): validated at load and shown in the dashboard,
-    /// but the WFP DNS-hijack it feeds is a stub, so port-53 redirection is
-    /// NOT enforced on the wire. main.rs logs this at startup.
+    /// A user-mode WFP filter can block plaintext DNS, but redirecting it to
+    /// this address requires a signed kernel callout that is not shipped by
+    /// this project. Non-empty values are therefore rejected fail-closed;
+    /// `None` is the only supported value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trusted_dns: Option<String>,
     /// 0 = do not TCP-segment ClientHello. Default 64 (never 1).
@@ -47,9 +42,9 @@ pub struct Settings {
     pub enable_kill_switch: bool,
     #[serde(default)]
     pub kill_switch_adapter: String,
-    /// NOT APPLIED (audit F-003): validated at load and shown in the
-    /// dashboard, but no destination-IP rotation happens on the wire — see
-    /// the comment in `pipeline::apply_client_hello` for why.
+    /// Optional relay-mode destination rotation. Each new local relay
+    /// connection selects the next validated IP; transparent WinDivert flows
+    /// keep their established destination and are never rewritten mid-flow.
     #[serde(default)]
     pub rotate_ips: Vec<String>,
     #[serde(default)]
@@ -656,25 +651,23 @@ impl Settings {
         if self.enable_kill_switch {
             crate::stealth::sanitize_adapter_name(&self.kill_switch_adapter)?;
         }
-        if let Some(dns) = &self.trusted_dns {
-            if dns.parse::<IpAddr>().is_err() {
-                return Err(DpiGuardError::Config("trusted_dns must be valid IP".into()));
-            }
-            log::warn!(
-                "trusted_dns is set but unused in this build (WFP DNS hijack is a stub); \
-                 leave it empty. Destination lookup uses doh_server / relay_resolve_doh."
-            );
-        }
-        if !self.rotate_ips.is_empty() {
-            log::warn!(
-                "rotate_ips is set but not applied on the wire in this build; \
-                 the relay has a single fixed destination. Leave the list empty."
-            );
+        if self.trusted_dns.is_some() {
+            return Err(DpiGuardError::Config(
+                "trusted_dns is unsupported: DNS redirection requires a signed WFP kernel callout; remove this legacy setting and use doh_server/relay_resolve_doh".into(),
+            ));
         }
         for ip in &self.rotate_ips {
-            if ip.parse::<IpAddr>().is_err() {
-                return Err(DpiGuardError::Config(format!("rotate_ips {ip:?} invalid")));
-            }
+            let parsed = ip
+                .parse::<IpAddr>()
+                .map_err(|_| DpiGuardError::Config(format!("rotate_ips {ip:?} invalid")))?;
+            crate::netguard::validate_relay_ip(parsed).map_err(|e| {
+                DpiGuardError::Config(format!("rotate_ips {ip:?} is forbidden: {e}"))
+            })?;
+        }
+        if !self.win_divert_sha256.is_empty() && self.win_divert_sha256.len() != 2 {
+            return Err(DpiGuardError::Config(
+                "win_divert_sha256 must contain exactly two pins in order: WinDivert.dll, WinDivert64.sys".into(),
+            ));
         }
         for h in &self.win_divert_sha256 {
             let h = h.trim();
@@ -1063,26 +1056,43 @@ mod tests {
     }
 
     #[test]
-    fn parses_overrides() {
+    fn parses_overrides_and_rejects_legacy_dns_redirect() {
         let toml = r#"
             mutation_profile = "Aggressive"
             decoy_ttl = 5
             idle_timeout_secs = 60
-            trusted_dns = "1.1.1.1"
             fragment_chunk_size = 32
             enable_decoys = false
         "#;
         let s = parse(toml).unwrap();
         assert_eq!(s.mutation_profile, "Aggressive");
         assert_eq!(s.decoy_ttl, 5);
-        assert_eq!(s.trusted_dns.as_deref(), Some("1.1.1.1"));
+        assert_eq!(s.trusted_dns, None);
         assert_eq!(s.fragment_chunk_size, 32);
         assert!(!s.enable_decoys);
+
+        let err = parse("trusted_dns = \"1.1.1.1\"\n").unwrap_err();
+        assert!(err.to_string().contains("signed WFP kernel callout"));
     }
 
     #[test]
     fn rejects_malformed_toml() {
         assert!(parse("not = [valid").is_err());
+    }
+
+    #[test]
+    fn rotate_ips_accepts_approved_addresses_and_rejects_forbidden_targets() {
+        let parsed = parse("rotate_ips = [\"1.1.1.1\", \"1.0.0.1\"]").unwrap();
+        assert_eq!(
+            parsed.rotate_ips,
+            vec!["1.1.1.1".to_string(), "1.0.0.1".to_string()]
+        );
+        for raw in ["not-an-ip", "127.0.0.1", "169.254.169.254", "::1"] {
+            assert!(
+                parse(&format!("rotate_ips = [\"{raw}\"]")).is_err(),
+                "forbidden rotation target {raw} must fail validation"
+            );
+        }
     }
 
     /// Audit F-04 regression: the shipped example must stay parseable by
@@ -1091,14 +1101,14 @@ mod tests {
     /// `trusted_dns` were missing entirely while both having dashboard
     /// controls and mock entries.
     #[test]
-    fn shipped_toml_example_parses_and_documents_stub_fields() {
+    fn shipped_toml_example_parses_and_documents_partial_fields() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("dpi_guard.toml.example");
         let text = std::fs::read_to_string(&path)
             .expect("dpi_guard.toml.example must ship with the crate");
         let s = parse(&text).expect("example config must parse AND validate");
         assert_eq!(s.rotate_ips, Vec::<String>::new());
         assert!(s.trusted_dns.is_none());
-        // The stub-backed fields stay documented in the file body.
+        // The partial/limited fields stay documented in the file body.
         assert!(text.contains("rotate_ips ="));
         assert!(text.contains("trusted_dns ="));
     }
@@ -1126,7 +1136,8 @@ mod tests {
     #[test]
     fn win_divert_pins_must_be_64_hex_chars() {
         let good = "a".repeat(64);
-        assert!(parse(&format!("win_divert_sha256 = [\"{good}\"]\n")).is_ok());
+        assert!(parse(&format!("win_divert_sha256 = [\"{good}\", \"{good}\"]\n")).is_ok());
+        assert!(parse(&format!("win_divert_sha256 = [\"{good}\"]\n")).is_err());
         assert!(parse("win_divert_sha256 = [\"abcd\"]\n").is_err());
     }
 
@@ -1318,7 +1329,7 @@ mod tests {
     fn redacted_toml_hides_token_and_pins() {
         let s = Settings {
             web_ui_token: "secret-secret-secret".into(),
-            win_divert_sha256: vec!["a".repeat(64)],
+            win_divert_sha256: vec!["a".repeat(64), "b".repeat(64)],
             ..Settings::default()
         };
         let toml = redacted_toml(&s).unwrap();
@@ -1350,18 +1361,16 @@ mod tests {
         assert!(redacted_toml(&s).is_ok());
     }
 
-    /// The dashboard must be able to both set and *clear* `trusted_dns`;
-    /// an empty value removes the key rather than storing an invalid IP.
+    /// The dashboard must not turn the legacy `trusted_dns` field into a
+    /// false promise: non-empty values fail closed, while an empty value is
+    /// treated as removal for backwards-compatible cleanup.
     #[test]
-    fn trusted_dns_can_be_set_and_cleared_from_the_ui() {
+    fn trusted_dns_redirect_is_rejected_and_can_be_cleared() {
         let base = Settings::default();
-        let set = merge_partial(&base, "trusted_dns = \"1.1.1.1\"\n").unwrap();
-        assert_eq!(set.trusted_dns.as_deref(), Some("1.1.1.1"));
-        // Clearing it: "" must not be stored (validate rejects a non-IP).
-        let cleared = merge_partial(&set, "trusted_dns = \"\"\n").unwrap();
+        let err = merge_partial(&base, "trusted_dns = \"1.1.1.1\"\n").unwrap_err();
+        assert!(err.to_string().contains("signed WFP kernel callout"));
+        let cleared = merge_partial(&base, "trusted_dns = \"\"\n").unwrap();
         assert_eq!(cleared.trusted_dns, None);
-        // A bad IP is still rejected.
-        assert!(merge_partial(&base, "trusted_dns = \"not-an-ip\"\n").is_err());
     }
 
     /// Every Settings field must survive a partial merge that only touches
@@ -1369,16 +1378,15 @@ mod tests {
     #[test]
     fn merge_partial_preserves_every_untouched_field() {
         let base = Settings {
-            trusted_dns: Some("9.9.9.9".into()),
             web_ui_token: "0123456789abcdef".into(),
-            win_divert_sha256: vec!["b".repeat(64)],
+            win_divert_sha256: vec!["b".repeat(64), "c".repeat(64)],
             intercept_ports: vec![443, 8443],
             sni_except: vec!["bank.example.com".into()],
             ..Settings::default()
         };
         let merged = merge_partial(&base, "enable_autottl = true\n").unwrap();
         assert!(merged.enable_autottl);
-        assert_eq!(merged.trusted_dns.as_deref(), Some("9.9.9.9"));
+        assert_eq!(merged.trusted_dns, None);
         assert_eq!(merged.web_ui_token, "0123456789abcdef");
         assert_eq!(merged.win_divert_sha256, vec!["b".repeat(64)]);
         assert_eq!(merged.intercept_ports, vec![443, 8443]);

@@ -7,7 +7,7 @@
 import { JSDOM, VirtualConsole } from "jsdom";
 import fs from "node:fs";
 import path from "node:path";
-import { createServer, resetForTests, getSettings, DEFAULTS } from "./mock-server.mjs";
+import { createServer, resetForTests, setStatusForTests, getSettings, DEFAULTS } from "./mock-server.mjs";
 
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const HTML_PATH = path.join(REPO, "src/webui/index.html");
@@ -50,8 +50,9 @@ const BASE = `http://127.0.0.1:${PORT}`;
 
 const captured = [];   // every non-GET API request the UI made
 
-async function makeDom({ token = TOKEN } = {}) {
+async function makeDom({ token = TOKEN, status = null } = {}) {
   resetForTests();
+  if (status) setStatusForTests(status);
   captured.length = 0;
   const vc = new VirtualConsole();
   vc.on("jsdomError", (e) => { throw e; });
@@ -84,6 +85,16 @@ async function makeDom({ token = TOKEN } = {}) {
 /** Let pending promises + the boot sequence settle. */
 const settle = (ms = 120) => new Promise((r) => setTimeout(r, ms));
 
+/** Wait for a real DOM/API condition instead of relying on a cold-CPU sleep. */
+async function waitFor(predicate, timeout = 2000, interval = 20) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (predicate()) return true;
+    await settle(interval);
+  }
+  return !!predicate();
+}
+
 function setText(doc, key, value) {
   const el = doc.getElementById("f_" + key);
   if (!el) throw new Error("no control for " + key);
@@ -108,7 +119,12 @@ eq("Settings field count parsed from config.rs", realFields.length, 82);
 {
   const dom = await makeDom();
   const doc = dom.window.document;
-  await settle(250);
+  const booted = await waitFor(() =>
+    doc.getElementById("f_decoy_ttl")?.value === String(DEFAULTS.decoy_ttl) &&
+    doc.querySelectorAll("#cards .card").length >= 10 &&
+    doc.querySelectorAll("#profiles button").length === 7,
+  );
+  ok("dashboard boot completed before assertions", booted);
 
   console.log("\n[2] every Settings field renders a real, editable control");
   const missingCtl = [];
@@ -288,6 +304,12 @@ eq("Settings field count parsed from config.rs", realFields.length, 82);
   ok("advanced validate succeeded", doc.getElementById("msg").className === "ok",
     JSON.stringify(doc.getElementById("msg").textContent));
   doc.getElementById("toml").value = tomlText.replace(/decoy_ttl = \d+/, "decoy_ttl = 7");
+  const requestsBeforeRawConfirm = captured.length;
+  dom.window.__confirmAnswer = false;
+  click(doc, "btn_toml_save");
+  await settle(50);
+  ok("raw TOML dangerous flags still require confirmation", captured.length === requestsBeforeRawConfirm);
+  dom.window.__confirmAnswer = true;
   click(doc, "btn_toml_save");
   await settle(250);
   eq("advanced editor save applied", getSettings().decoy_ttl, 7);
@@ -382,8 +404,36 @@ console.log("\n[20] a bad token surfaces the token dialog (401 path)");
   dom.window.close();
 }
 
+/* ---- hostile server values / XSS regression ---- */
+console.log("\n[21] hostile status values render as text, not markup");
+{
+  const hostile = '<img src=x onerror=alert(1)>';
+  const dom = await makeDom({
+    status: {
+      mutation_profile: hostile,
+      fronting_benign_sni: hostile,
+      recent_domains: [hostile],
+      strategy_scores: [{ key: hostile, score: hostile }],
+    },
+  });
+  const doc = dom.window.document;
+  const booted = await waitFor(() => doc.getElementById("conn").className === "pill on");
+  ok("hostile status fixture loaded", booted);
+  ok("hostile card values are text, not elements",
+    doc.querySelectorAll("#cards img, #cards svg, #cards script").length === 0 &&
+    doc.getElementById("cardv_profile").textContent === hostile &&
+    doc.getElementById("cardv_fronting").textContent === hostile);
+  ok("hostile strategy score is text, not markup",
+    doc.querySelectorAll("#scores img, #scores svg, #scores script").length === 0 &&
+    doc.querySelector("#scores tr td")?.textContent === hostile);
+  ok("hostile recent domain uses textContent",
+    doc.getElementById("domains").textContent === hostile &&
+    doc.getElementById("domains").children.length === 0);
+  dom.window.close();
+}
+
 /* ---- HTML hygiene ---- */
-console.log("\n[21] HTML hygiene");
+console.log("\n[22] HTML hygiene");
 {
   const html = fs.readFileSync(HTML_PATH, "utf8");
   ok("balanced <html>", (html.match(/<html/g) || []).length === 1 && (html.match(/<\/html>/g) || []).length === 1);

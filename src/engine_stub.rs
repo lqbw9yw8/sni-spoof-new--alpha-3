@@ -1,5 +1,5 @@
 //! engine_stub — compiled in place of `engine.rs` on any non-Windows
-//! target. Signatures match `engine.rs` so the rest of the crate links.
+//! target. [STUB] Signatures match `engine.rs` so the rest of the crate links.
 
 use crate::error::DpiGuardError;
 use crate::fail_open::WireAction;
@@ -48,7 +48,11 @@ where
     Err(not_supported())
 }
 
-pub fn version_check(_expected_hashes: &[String]) -> Result<(), DpiGuardError> {
+/// Non-Windows placeholder matching the Windows lifetime guard type.
+#[derive(Debug, Default)]
+pub struct DriverPin;
+
+pub fn version_check(_expected_hashes: &[String]) -> Result<DriverPin, DpiGuardError> {
     Err(not_supported())
 }
 
@@ -76,8 +80,8 @@ pub fn request_filter_reload(_new_filter: &str) {
 }
 
 /// Same backoff schedule as `engine.rs`, mirrored here so the logic is
-/// compiled **and unit tested** on non-Windows CI rather than only ever
-/// existing in a `cfg(windows)` module nobody runs.
+/// compiled on non-Windows CI rather than only ever existing in a
+/// `cfg(windows)` module nobody runs; current Rust tests were not executed.
 pub fn recv_backoff(consecutive_errors: u32) -> Duration {
     let exp = consecutive_errors.min(5);
     let ms = 20u64.saturating_mul(1u64 << exp);

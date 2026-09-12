@@ -1,4 +1,4 @@
-//! Fail-open panic/error boundary used by the capture loop. [DONE]
+//! Fail-open panic/error boundary used by the capture loop. [UNTESTED]
 //! Lives in a cfg-free module so the tests run on every OS (they used to
 //! sit inside `engine.rs`, which is `cfg(windows)` only).
 
@@ -33,13 +33,18 @@ where
     let original_owned = original.to_vec();
     match catch_unwind(AssertUnwindSafe(|| f(original_owned))) {
         Ok(Ok(WireAction::Send(packets))) if !packets.is_empty() => WireAction::Send(packets),
-        Ok(Ok(WireAction::Send(_))) => WireAction::Send(vec![original.to_vec()]),
+        Ok(Ok(WireAction::Send(_))) => {
+            crate::observability::fail_open_event();
+            WireAction::Send(vec![original.to_vec()])
+        }
         Ok(Ok(WireAction::Hold)) => WireAction::Hold,
         Ok(Err(e)) => {
+            crate::observability::fail_open_event();
             log::error!("mutation returned error, passing original packet through: {e}");
             WireAction::Send(vec![original.to_vec()])
         }
         Err(panic_payload) => {
+            crate::observability::fail_open_event();
             let msg = panic_payload
                 .downcast_ref::<&str>()
                 .map(|s| (*s).to_string())
@@ -86,6 +91,18 @@ mod tests {
             |_: Vec<u8>| -> Result<WireAction, DpiGuardError> { Err(DpiGuardError::SniNotFound) };
         let out = handle_exception_fail_open(&original, &mut f);
         assert_eq!(out, WireAction::Send(vec![original]));
+    }
+
+    #[test]
+    fn fail_open_err_does_not_return_closure_mutations() {
+        let original = vec![9, 8, 7];
+        let expected = original.clone();
+        let mut f = |mut owned: Vec<u8>| -> Result<WireAction, DpiGuardError> {
+            owned.fill(0xEE);
+            Err(DpiGuardError::SniNotFound)
+        };
+        let out = handle_exception_fail_open(&original, &mut f);
+        assert_eq!(out, WireAction::Send(vec![expected]));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! scanner — SNI / CDN-Edge scanner and ranker. [DONE]
+//! scanner — SNI / CDN-Edge scanner and ranker. [UNTESTED]
 //!
 //! Probes candidate SNI domains and CDN edge IPs by opening real TLS/TCP
 //! connections (no root/admin needed for the SNI scan). Results are
@@ -198,93 +198,66 @@ pub fn auto_select_best_relay_target(timeout: Duration) -> Option<(String, Strin
     best_spoof_pair(&pairs, timeout).map(|(pair, _)| (pair.connect_ip, pair.fake_sni))
 }
 
-use std::io::{Read, Write};
-
-/// Performs a real live TLS handshake probe to (ip, port) with the specified fake SNI.
-/// Sends a real ClientHello and expects a TLS ServerHello record (0x16).
-/// Returns (latency, tls_ok, error).
+/// Performs a real live HTTPS probe to `(ip, port)` with the specified SNI.
+///
+/// The old probe wrote a hand-rolled ClientHello and treated a bare
+/// `ServerHello` record as `cert_valid`. That only proved that something on
+/// the path emitted a TLS-looking byte sequence. This path uses ureq's
+/// rustls verifier with the candidate SNI, while its resolver pins the TCP
+/// connection to the caller-supplied IP. A successful response — including
+/// an HTTP error status — therefore means the certificate chain and hostname
+/// were accepted by rustls. It never follows redirects.
+///
+/// Returns `(latency, certificate_and_tls_ok, error)`.
 pub fn probe_tls_handshake(
     ip: IpAddr,
     port: u16,
     sni: &str,
     timeout: Duration,
 ) -> (Option<Duration>, bool, Option<String>) {
-    let addr = SocketAddr::new(ip, port);
-    let start = Instant::now();
-    let mut stream = match TcpStream::connect_timeout(&addr, timeout) {
-        Ok(s) => s,
-        Err(e) => return (None, false, Some(format!("TCP connect failed: {e}"))),
-    };
-
-    let tcp_latency = start.elapsed();
-    let _ = stream.set_read_timeout(Some(timeout));
-    let _ = stream.set_write_timeout(Some(timeout));
-
-    let client_hello = crate::fragmentation::encode_client_hello(sni);
-    if let Err(e) = stream.write_all(&client_hello) {
-        return (
-            Some(tcp_latency),
-            false,
-            Some(format!("TLS ClientHello write failed: {e}")),
-        );
+    if crate::netguard::validate_relay_ip(ip).is_err() {
+        return (None, false, Some("probe target IP is forbidden".into()));
+    }
+    let sni = sni.trim();
+    if sni.is_empty()
+        || sni.len() > 253
+        || crate::netguard::is_forbidden_hostname(sni)
+        || !sni
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+        || sni.starts_with('.')
+        || sni.ends_with('.')
+        || sni.contains("..")
+    {
+        return (None, false, Some("probe SNI is not a valid hostname".into()));
     }
 
-    let mut resp_header = [0u8; 5];
-    match stream.read_exact(&mut resp_header) {
-        Ok(_) => {
-            // 0x16 is TLS Handshake Record (ServerHello / Certificate)
-            if resp_header[0] != 0x16 {
-                let total_latency = start.elapsed();
-                if resp_header[0] == 0x15 {
-                    return (
-                        Some(total_latency),
-                        false,
-                        Some("TLS Alert received from server".into()),
-                    );
-                }
-                return (
-                    Some(total_latency),
-                    false,
-                    Some(format!(
-                        "Unexpected response header: 0x{:02X}",
-                        resp_header[0]
-                    )),
-                );
-            }
-            // A 0x16 record alone is not proof of an UNBLOCKED target: an
-            // intercepting middlebox can synthesize a handshake record too.
-            // Validate the first handshake byte as well — a real ServerHello
-            // carries handshake type 0x02 at offset 5 (record header is 5
-            // bytes). Anything else (0x01 requested continuation, 0x0B
-            // session-ticket batch, etc.) is not accepted as a live
-            // ServerHello confirmation.
-            let mut hs_type = [0u8; 1];
-            if let Err(e) = stream.read_exact(&mut hs_type) {
-                return (
-                    Some(tcp_latency),
-                    false,
-                    Some(format!("TLS handshake type read error: {e}")),
-                );
-            }
-            let total_latency = start.elapsed();
-            if hs_type[0] == 0x02 {
-                (Some(total_latency), true, None)
-            } else {
-                (
-                    Some(total_latency),
-                    false,
-                    Some(format!(
-                        "record is a handshake but type is 0x{:02X} (expected ServerHello 0x02)",
-                        hs_type[0]
-                    )),
-                )
-            }
-        }
-        Err(e) => (
-            Some(tcp_latency),
-            false,
-            Some(format!("TLS ServerHello read error: {e}")),
+    let start = Instant::now();
+    let resolver = move |_netloc: &str| -> std::io::Result<Vec<SocketAddr>> {
+        // ureq receives the URL hostname for TLS/SNI but this callback makes
+        // the actual socket use the already-selected edge IP. No second DNS
+        // lookup is possible in the probe.
+        Ok(vec![SocketAddr::new(ip, port)])
+    };
+    let agent = ureq::AgentBuilder::new()
+        .resolver(resolver)
+        .https_only(true)
+        .redirects(0)
+        .build();
+    let url = format!("https://{sni}:{port}/");
+    match agent
+        .get(&url)
+        .timeout(timeout)
+        .set("Connection", "close")
+        .call()
+    {
+        Ok(_) => (Some(start.elapsed()), true, None),
+        Err(ureq::Error::Status(code, _)) => (
+            Some(start.elapsed()),
+            true,
+            Some(format!("HTTPS server returned HTTP status {code} after TLS verification")),
         ),
+        Err(e) => (Some(start.elapsed()), false, Some(format!("HTTPS probe failed: {e}"))),
     }
 }
 
@@ -307,7 +280,11 @@ pub fn probe_spoof_pair(pair: &SpoofCandidatePair, timeout: Duration) -> ProbeRe
             ProbeResult {
                 candidate: pair.fake_sni.clone(),
                 ip: Some(ip),
-                success: lat.is_some() && (tls_ok || err.is_none()),
+                // A TCP connection or a server-generated TLS alert is not a
+                // successful candidate. Only the rustls-verified handshake
+                // counts as success; HTTP status errors are still represented
+                // as `tls_ok=true` by probe_tls_handshake.
+                success: lat.is_some() && tls_ok,
                 latency_ms: lat.map(|d| d.as_millis() as u64),
                 tls_ok,
                 cert_valid: tls_ok,
@@ -602,7 +579,7 @@ mod tests {
 
     #[test]
     fn probe_tls_handshake_handles_invalid_target() {
-        let ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 1)); // documentation IP
+        let ip = std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
         let (lat, tls_ok, err) =
             probe_tls_handshake(ip, 443, "example.com", Duration::from_millis(20));
         assert!(!tls_ok);

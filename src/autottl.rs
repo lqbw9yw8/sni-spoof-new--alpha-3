@@ -1,4 +1,4 @@
-//! autottl — learn the decoy TTL from the inbound hop count. [DONE]
+//! autottl — learn the decoy TTL from the inbound hop count. [UNTESTED]
 //!
 //! A TTL-limited decoy must travel far enough to reach the *in-line DPI*
 //! box but die before the real origin replies. The safest first guess is the
@@ -12,7 +12,7 @@
 //! The learned value is a *hint*: the operator's `decoy_ttl` setting is the
 //! hard ceiling, and we never raise TTL above 64 (the protocol's common
 //! inner value). This module is pure logic + in-memory state, so it is unit
-//! tested on every OS.
+//! testable on every OS; the current checkout's Rust tests are not executed.
 
 use std::collections::HashMap;
 use std::net::IpAddr;

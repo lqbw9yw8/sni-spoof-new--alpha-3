@@ -1,4 +1,4 @@
-//! singleton — one-instance lock next to the executable. [DONE]
+//! singleton — one-instance lock next to the executable. [UNTESTED]
 //!
 //! patterniha's Python relay and `dpi_guard` must not run at the same time
 //! (both would open WinDivert and both would try to bind 127.0.0.1:40443),

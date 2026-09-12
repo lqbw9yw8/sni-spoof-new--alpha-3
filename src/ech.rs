@@ -1,4 +1,4 @@
-//! ech — Encrypted Client Hello (ECH) handling — [DONE]
+//! ech — Encrypted Client Hello (ECH) handling — [UNTESTED]
 //! Based on draft-ietf-tls-esni and Cloudflare blog.
 //! ECH encrypts the real SNI in an inner ClientHello, outer SNI is benign.
 //! This module implements:
@@ -393,7 +393,10 @@ fn build_encoded_inner(
         // TLS 1.3 is mandatory inside ECH; add supported_versions = [0x0304].
         ext_list.extend_from_slice(&[0x00, 0x2B, 0x00, 0x03, 0x02, 0x03, 0x04]);
     }
-    out.extend_from_slice(&(ext_list.len() as u16).to_be_bytes());
+    let ext_len = u16::try_from(ext_list.len()).map_err(|_| {
+        DpiGuardError::OutOfRange("ECH inner extensions exceed the u16 wire limit".into())
+    })?;
+    out.extend_from_slice(&ext_len.to_be_bytes());
     out.extend_from_slice(&ext_list);
 
     // Zero padding (RFC 9849 §6.1.3): hide the name length, then align the
@@ -499,14 +502,20 @@ pub fn seal_real_ech_hello(
     // 4. Extension body with a zeroed payload placeholder:
     //    kdf_id u16 | aead_id u16 | config_id u8 | u16(enc_len) | enc
     //    | u16(payload_len) | payload(zeros).
-    let ct_len = plaintext.len() + 16; // ChaCha20Poly1305 tag
+    let ct_len = plaintext
+        .len()
+        .checked_add(16)
+        .ok_or_else(|| DpiGuardError::OutOfRange("ECH ciphertext length overflow".into()))?;
+    let ct_len_u16 = u16::try_from(ct_len).map_err(|_| {
+        DpiGuardError::OutOfRange("ECH ciphertext exceeds the u16 wire limit".into())
+    })?;
     let mut ext_body = Vec::with_capacity(9 + enc.len() + ct_len);
     ext_body.extend_from_slice(&crate::hpke::KDF_ID_SHA256.to_be_bytes());
     ext_body.extend_from_slice(&crate::hpke::AEAD_ID_CHACHA20_POLY1305.to_be_bytes());
     ext_body.push(cfg.config_id);
     ext_body.extend_from_slice(&(enc.len() as u16).to_be_bytes());
     ext_body.extend_from_slice(&enc);
-    ext_body.extend_from_slice(&(ct_len as u16).to_be_bytes());
+    ext_body.extend_from_slice(&ct_len_u16.to_be_bytes());
     ext_body.extend(std::iter::repeat_n(0u8, ct_len));
     let mut hello = crate::fragmentation::inject_hidden_sni_in_unknown_ext(
         &outer,

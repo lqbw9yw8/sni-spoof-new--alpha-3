@@ -1,7 +1,7 @@
-//! Bounded retirement policy for WinDivert driver handles. [DONE]
+//! Bounded retirement policy for WinDivert driver handles. [UNTESTED]
 //!
-//! Pure logic, cfg-free, so the policy is compiled and unit tested on every
-//! OS. `engine.rs` (Windows-only) applies it to the retired-handle list.
+//! Pure logic, cfg-free, so the policy can be compiled on every OS; the
+//! current checkout's Rust tests are not executed in this environment. `engine.rs` (Windows-only) applies it to the retired-handle list.
 //!
 //! ## Why handles are parked at all
 //!
@@ -28,8 +28,9 @@
 //!    event that is strictly better than an unbounded kernel-handle leak.
 //!    Even in this path nothing panics and the packet path is unaffected:
 //!    the capture loop only ever sends on the *current* handle, and
-//!    `reinject_held_packets` falls back to the send-only inject handle if
-//!    a send on a closed handle errors.
+//!    `reinject_held_packets` only sends packets whose captured
+//!    `WinDivertAddress` is still owned by the held entry; it never constructs
+//!    an address-less packet after the 0.5.5 wrapper's unsafe constructor.
 
 use std::time::Duration;
 

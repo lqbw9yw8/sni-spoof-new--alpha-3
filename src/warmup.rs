@@ -1,4 +1,4 @@
-//! warmup — TLS pre-connect / path warmup. [DONE]
+//! warmup — TLS pre-connect / path warmup. [UNTESTED]
 //!
 //! Opens TLS connections to popular domains ahead of time so the first
 //! real request is faster. Useful for YouTube warmup (pre-connect to

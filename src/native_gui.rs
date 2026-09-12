@@ -698,7 +698,7 @@ impl DpiGuardApp {
             ui,
             "Web UI token:",
             &mut s.web_ui_token,
-            "16+ ASCII chars — empty = auto-generated token",
+            "16+ ASCII chars — required for GUI/service startup; empty only works with an interactive terminal",
         );
     }
 

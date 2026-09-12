@@ -1,4 +1,4 @@
-//! proxy_cleanup — save and restore Windows system proxy settings. [DONE]
+//! proxy_cleanup — save and restore Windows system proxy settings. [UNTESTED]
 //!
 //! Before enabling system proxy, saves the current state. On exit or
 //! crash, restores it. Prevents orphaned proxy settings that break

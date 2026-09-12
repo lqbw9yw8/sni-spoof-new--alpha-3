@@ -1,4 +1,4 @@
-//! connection — health, failover, resumption. [DONE] for decision logic.
+//! connection — health, failover, resumption. [UNTESTED] for decision logic.
 
 use indexmap::IndexMap;
 use std::net::IpAddr;

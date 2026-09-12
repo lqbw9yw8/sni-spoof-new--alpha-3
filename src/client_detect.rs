@@ -1,4 +1,4 @@
-//! client_detect — auto-detect running proxy clients. [DONE]
+//! client_detect — auto-detect running proxy clients. [UNTESTED]
 //!
 //! Scans for known processes (v2rayN, Xray, sing-box) and optionally
 //! patches their configuration to point at the dpi_guard relay.

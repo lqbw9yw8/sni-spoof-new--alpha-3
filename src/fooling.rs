@@ -1,4 +1,4 @@
-//! fooling — 8 TCP-layer deception techniques. [DONE] for construction.
+//! fooling — 8 TCP-layer deception techniques. [UNTESTED] for construction.
 //!
 //! SYN-ACK/RST "swap endpoint" foolers are built here; the pipeline only
 //! emits them when `enable_swap_foolers` is on (off by default). Live

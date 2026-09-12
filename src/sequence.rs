@@ -1,4 +1,4 @@
-//! sequence — decoy-packet / out-of-window SEQ techniques. [DONE] for
+//! sequence — decoy-packet / out-of-window SEQ techniques. [UNTESTED] for
 //! construction; the capture loop sends the bytes.
 
 use crate::error::DpiGuardError;

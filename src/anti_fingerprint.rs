@@ -1,4 +1,4 @@
-//! anti_fingerprint — advanced anti-fingerprinting for DPI evasion. [DONE]
+//! anti_fingerprint — advanced anti-fingerprinting for DPI evasion. [UNTESTED]
 //!
 //! Provides randomization of packet timing, size, and IP-ID to prevent
 //! DPI systems from correlating injected fake packets with the real flow

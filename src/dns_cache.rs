@@ -1,5 +1,5 @@
 //! dns_cache — TTL cache with best-effort disk persistence for DoH
-//! answers. [DONE] Pure logic, no async, tested on every OS.
+//! answers. [UNTESTED] Pure logic, no async; current Rust tests were not executed.
 //!
 //! Why this exists: on a network with frequent outages and heavy packet
 //! loss, a single failed DoH query must not cost the operator their
@@ -245,14 +245,29 @@ impl DnsCache {
             if ips.is_empty() {
                 continue;
             }
-            cache.entries.insert(
-                normalize(host),
-                Entry {
-                    ips,
-                    at: Instant::now() - Duration::from_secs(wall - stored),
-                    ttl,
-                },
-            );
+            let key = normalize(host);
+            if key.is_empty() {
+                continue;
+            }
+            let entry = Entry {
+                ips,
+                at: Instant::now() - Duration::from_secs(wall - stored),
+                ttl,
+            };
+            // Apply the same hard entry cap while loading as while inserting
+            // live answers. Without this, a file below MAX_CACHE_BYTES could
+            // still expand the in-memory HashMap beyond MAX_ENTRIES.
+            if cache.entries.len() >= MAX_ENTRIES && !cache.entries.contains_key(&key) {
+                if let Some(oldest) = cache
+                    .entries
+                    .iter()
+                    .min_by_key(|(_, e)| e.at)
+                    .map(|(k, _)| k.clone())
+                {
+                    cache.entries.remove(&oldest);
+                }
+            }
+            cache.entries.insert(key, entry);
         }
         cache
     }
@@ -442,6 +457,18 @@ mod tests {
         assert_eq!(back.len(), 2);
         let (ips, _) = back.lookup("a.example.com", Instant::now()).unwrap();
         assert_eq!(ips, vec![ip("1.2.3.4"), ip("5.6.7.8")]);
+    }
+
+    #[test]
+    fn loading_many_valid_lines_still_honors_entry_cap() {
+        let wall = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let text: String = (0..(MAX_ENTRIES + 50))
+            .map(|i| format!("host{i}.example\t{wall}\t1.2.3.4\t300\n"))
+            .collect();
+        assert_eq!(DnsCache::from_text(&text).len(), MAX_ENTRIES);
     }
 
     #[test]
